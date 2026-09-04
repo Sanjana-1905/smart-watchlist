@@ -1,15 +1,21 @@
-import logging
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 import redis
 from sqlalchemy import create_engine, text
 from app.core.config import settings
 from app.api import stocks, watchlist, profile
 from app.jobs.market_poll import start_scheduler
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("main")
-
 app = FastAPI(title="Smart Watchlist API")
+
+# Enable CORS for frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(stocks.router)
 app.include_router(watchlist.router)
@@ -20,22 +26,12 @@ _scheduler = None
 @app.on_event("startup")
 def on_startup():
     global _scheduler
-    logger.info(">>> STARTUP EVENT FIRING <<<")
-    try:
-        _scheduler = start_scheduler()
-        logger.info(f">>> SCHEDULER STARTED: {_scheduler} <<<")
-        jobs = _scheduler.get_jobs()
-        logger.info(f">>> SCHEDULER JOBS: {jobs} <<<")
-    except Exception as e:
-        logger.exception(">>> STARTUP FAILED <<<")
-        raise
+    _scheduler = start_scheduler()
 
 @app.on_event("shutdown")
 def on_shutdown():
-    logger.info(">>> SHUTDOWN EVENT FIRING <<<")
     if _scheduler:
         _scheduler.shutdown(wait=False)
-        logger.info(">>> SCHEDULER SHUTDOWN <<<")
 
 @app.get("/health")
 def health():
