@@ -7,11 +7,25 @@ from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.core.errors import AppError
 from app.core.current_user import get_current_user_id
-from app.models import WatchlistItem
-from app.repositories import stock_repository, watchlist_repository, view_state_repository
+from app.core.market_clock import get_market_status
+from app.core.freshness import evaluate_freshness
+from app.models import WatchlistItem, UserProfile
+from app.repositories import stock_repository, watchlist_repository, view_state_repository, profile_repository
+from app.services.feature_service import extract_features
+from app.services.attention_service import (
+    calculate_attention,
+    UserPreferences,
+)
 from app.schemas.watchlist import WatchlistItemOut, AddWatchlistItemIn, ViewedIn
+from app.schemas.watchlist_changes import (
+    WatchlistChangesOut,
+    WatchlistChangeItemOut,
+    ReasonOut,
+    FreshnessOut,
+)
 
 router = APIRouter(prefix="/watchlist", tags=["watchlist"])
+
 
 @router.get("", response_model=list[WatchlistItemOut])
 def list_watchlist(db: Session = Depends(get_db), user_id: uuid.UUID = Depends(get_current_user_id)):
@@ -20,6 +34,7 @@ def list_watchlist(db: Session = Depends(get_db), user_id: uuid.UUID = Depends(g
         WatchlistItemOut(symbol=stock.symbol, company_name=stock.company_name, added_at=item.added_at)
         for item, stock in rows
     ]
+
 
 @router.post("/items", response_model=WatchlistItemOut, status_code=201)
 def add_watchlist_item(
@@ -44,6 +59,7 @@ def add_watchlist_item(
 
     return WatchlistItemOut(symbol=stock.symbol, company_name=stock.company_name, added_at=item.added_at)
 
+
 @router.delete("/items/{symbol}", status_code=204)
 def remove_watchlist_item(
     symbol: str,
@@ -63,6 +79,7 @@ def remove_watchlist_item(
     watchlist_repository.delete_item(db, item)
     return None
 
+
 @router.post("/viewed", status_code=204)
 def mark_viewed(
     payload: ViewedIn,
@@ -80,3 +97,96 @@ def mark_viewed(
 
     view_state_repository.upsert(db, user_id, stock.id, latest.close, datetime.now(timezone.utc))
     return None
+
+
+@router.get("/changes", response_model=WatchlistChangesOut)
+def get_watchlist_changes(
+    db: Session = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    """
+    Get attention-ranked watchlist with explainable reasons.
+    
+    This is the main product endpoint: it combines
+    - Market observations from snapshots
+    - User's last viewing baseline (user_view_state)
+    - User's preferences (user_profile)
+    - Attention scoring engine
+    to return a ranked, explained watchlist.
+    """
+    
+    # Get user's profile
+    profile = profile_repository.get_for_user(db, user_id)
+    if not profile:
+        raise AppError(404, "PROFILE_NOT_FOUND", "No profile found for user")
+    
+    # Build user preferences
+    preferences = UserPreferences(
+        risk_profile=profile.risk_profile,
+        attention_style=profile.attention_style,
+        time_horizon=profile.time_horizon,
+    )
+    
+    # Get watchlist items
+    rows = watchlist_repository.list_for_user(db, user_id)
+    
+    if not rows:
+        return WatchlistChangesOut(
+            generated_at=datetime.now(timezone.utc),
+            market_status=get_market_status(),
+            items=[],
+        )
+    
+    # Score each item
+    items = []
+    now = datetime.now(timezone.utc)
+    
+    for watchlist_item, stock in rows:
+        # Extract features from market data
+        features = extract_features(db, stock.id, user_id)
+        if features is None:
+            continue  # Skip if insufficient data
+        
+        # Calculate attention
+        result = calculate_attention(features, preferences)
+        
+        # Get freshness
+        latest_snap = stock_repository.get_latest_snapshot(db, stock.id)
+        freshness = evaluate_freshness(
+            latest_snap.timestamp if latest_snap else None,
+            latest_snap.source if latest_snap else "unknown",
+            now,
+        )
+        
+        # Build response item
+        item = WatchlistChangeItemOut(
+            symbol=stock.symbol,
+            company_name=stock.company_name,
+            current_price=float(latest_snap.close) if latest_snap else 0,
+            session_change_pct=round(features.session_return * 100, 2),
+            since_last_view_pct=round(features.since_view_return * 100, 2) if features.since_view_return is not None else None,
+            objective_score=result.objective_score,
+            preference_fit=result.preference_fit,
+            attention_score=result.final_score,
+            attention_level=result.level,
+            reasons=[
+                ReasonOut(type=r.type, value=r.value, message=r.message)
+                for r in result.reasons
+            ],
+            freshness=FreshnessOut(
+                status=freshness.status,
+                observed_at=freshness.observed_at or now,
+                source=freshness.source,
+                age_minutes=freshness.age_minutes,
+            ),
+        )
+        items.append(item)
+    
+    # Sort by attention_score descending
+    items.sort(key=lambda x: x.attention_score, reverse=True)
+    
+    return WatchlistChangesOut(
+        generated_at=now,
+        market_status=get_market_status(),
+        items=items,
+    )
