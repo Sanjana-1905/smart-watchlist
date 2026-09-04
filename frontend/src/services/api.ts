@@ -2,6 +2,8 @@ import type {
   WatchlistResponse,
   BasicWatchlistItem,
   UserProfile,
+  Stock,
+  PriceSnapshot,
 } from '../types/market';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
@@ -58,5 +60,17 @@ export const api = {
       method: 'DELETE',
     });
     if (!res.ok) throw new Error('Failed to remove stock');
+  },
+
+  async getStock(symbol: string): Promise<Stock> {
+    const res = await fetch(`${API_BASE}/stocks/${symbol}`);
+    if (!res.ok) throw new Error('Failed to fetch stock');
+    return res.json();
+  },
+
+  async getStockHistory(symbol: string): Promise<PriceSnapshot[]> {
+    const res = await fetch(`${API_BASE}/stocks/${symbol}/history`);
+    if (!res.ok) throw new Error('Failed to fetch stock history');
+    return res.json();
   },
 };

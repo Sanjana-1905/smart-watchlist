@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import type { WatchlistResponse } from '../types/market';
 import AttentionCard from '../components/AttentionCard';
 
@@ -8,6 +9,8 @@ interface DashboardProps {
 }
 
 export default function Dashboard({ data, loading, error }: DashboardProps) {
+  const navigate = useNavigate();
+
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-gray-600">Loading...</div>;
   }
@@ -46,7 +49,13 @@ export default function Dashboard({ data, loading, error }: DashboardProps) {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {topItems.map((item) => (
-                <AttentionCard key={item.symbol} item={item} />
+                <div
+                  key={item.symbol}
+                  onClick={() => navigate(`/stock/${item.symbol}`)}
+                  className="cursor-pointer"
+                >
+                  <AttentionCard item={item} />
+                </div>
               ))}
             </div>
           </section>
@@ -74,7 +83,11 @@ export default function Dashboard({ data, loading, error }: DashboardProps) {
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {data.items.map((item) => (
-                  <tr key={item.symbol} className="hover:bg-gray-50">
+                  <tr
+                    key={item.symbol}
+                    onClick={() => navigate(`/stock/${item.symbol}`)}
+                    className="hover:bg-gray-50 cursor-pointer"
+                  >
                     <td className="py-4 px-4">
                       <p className="font-semibold text-gray-900">{item.symbol}</p>
                       <p className="text-xs text-gray-600">{item.company_name}</p>

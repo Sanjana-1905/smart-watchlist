@@ -45,3 +45,21 @@ export interface UserProfile {
 }
 
 export type AttentionLevel = 'LOW' | 'MEDIUM' | 'HIGH';
+
+export interface Stock {
+  id: string;
+  symbol: string;
+  company_name: string;
+  exchange: string;
+  sector: string | null;
+}
+
+export interface PriceSnapshot {
+  timestamp: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  source: string;
+}
