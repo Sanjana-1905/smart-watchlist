@@ -18,61 +18,88 @@ It does not try to predict stocks or recommend trades.
 
 ---
 
-##  Quick Start
+## Requirements
+
+- Git
+- Docker Desktop with Docker Compose
+- Internet connection for the initial Docker build and market-data access
+
+No separate local installation of Python, Node.js, PostgreSQL, or Redis is required for the recommended Docker setup.
+
+- Docker Desktop: https://www.docker.com/products/docker-desktop/
+- Git: https://git-scm.com/downloads
+
+The Docker-based setup is intended to provide the same application environment across macOS, Windows, and Linux hosts supported by Docker Desktop.
+
+---
+
+## Quick Start
 
 ```bash
 git clone https://github.com/Sanjana-1905/smart-watchlist.git
 cd smart-watchlist
 cp .env.example .env
-docker compose up --build
+docker compose up --build -d
 ```
 
-Then open:
+Wait for the services to start, then verify them:
 
-```text
-http://localhost:5173
+```bash
+docker compose ps
 ```
 
-> If your frontend is exposed on a different port in `docker-compose.yml`, use that configured URL.
+Open:
 
-### See the core idea in ~90 seconds
+**http://localhost:5173**
+
+Backend health check:
+
+```bash
+curl http://localhost:8000/health
+```
+
+The first build may take a few minutes while Docker downloads and builds the required images.
+
+---
+
+## See the Core Idea in 90 Seconds
 
 1. Click **Continue as Momentum Investor**.
 2. Explore the **Attention Desk** and its ranked watchlist.
 3. Open a company and compare **Today** with **Since You Checked**.
-4. Open **Show the Math** to inspect the Attention Score.
-5. Click **Mark as caught up**.
-6. Notice that the user's baseline changes — not the underlying market history.
-7. Sign out.
-8. Click **Continue as Stability Investor**.
-9. Compare how the same market facts are interpreted through a different investor context.
+4. Open **Show the Math** to inspect exactly why the stock received its Attention Score.
+5. Click **Mark as caught up** and notice that the user's baseline changes while the underlying market history does not.
+6. Sign out.
+7. Click **Continue as Stability Investor**.
+8. Compare how the same market observations can produce different personal relevance for a different investor context.
 
 ```text
-SAME MARKET
-     │
-     ├──────────────────┐
-     ▼                  ▼
-Momentum Investor   Stability Investor
-     │                  │
-     ▼                  ▼
- Different personal relevance
-     │                  │
-     └────────┬─────────┘
-              ▼
-      Different attention
+                   SAME MARKET
+                       │
+              ┌────────┴────────┐
+              │                 │
+              ▼                 ▼
+      Momentum Investor   Stability Investor
+              │                 │
+              ▼                 ▼
+        Personal context   Personal context
+              │                 │
+              └────────┬────────┘
+                       ▼
+              Different attention
 ```
 
 > **Market facts remain objective. Attention is personal.**
 
 ---
 
-# Product Pitch
+## Product Pitch
 
 Smart Watchlist turns a passive stock list into a personalized attention system. Instead of asking users to repeatedly scan prices, it remembers what they last saw and identifies what changed meaningfully since then. Real market observations are persisted with provenance and freshness, while an explainable scoring engine separates objective market significance from personal relevance. Two contrasting investor profiles demonstrate why the same market event can deserve different levels of attention. Users can inspect every signal, explore historical patterns, understand score decomposition, and explicitly mark themselves caught up. The result is a watchlist designed around attention, context, transparency, and responsible decision support.
 
 ---
 
-# The Problem
+## The Problem
 
 A normal watchlist might show:
 
@@ -99,9 +126,9 @@ Smart Watchlist makes it part of the system.
 
 ---
 
-# Smart Watchlist vs a Traditional Watchlist
+## Smart Watchlist vs a Traditional Watchlist
 
-| | Traditional Watchlist | Smart Watchlist |
+| Aspect | Traditional Watchlist | Smart Watchlist |
 |---|---|---|
 | Primary question | What are my stocks doing? | What deserves my attention now? |
 | Comparison baseline | Usually today's reference | Today **and** last acknowledged view |
@@ -117,11 +144,10 @@ Smart Watchlist makes it part of the system.
 
 ---
 
-# How Smart Watchlist Thinks
+## How Smart Watchlist Thinks
 
 ```mermaid
 flowchart TB
-
     MARKET["Current Market Observation"]
     HISTORY["Historical Behaviour"]
     BASELINE["User's Last Acknowledged View"]
@@ -138,10 +164,8 @@ flowchart TB
 
     SCORE --> EXPLAIN["Show the Math"]
     SCORE --> PRIORITIZE["Attention Desk"]
-
     PRIORITIZE --> INVESTIGATE["Attention Lens"]
     INVESTIGATE --> CAUGHT["Mark as Caught Up"]
-
     CAUGHT --> BASELINE
 ```
 
@@ -156,7 +180,7 @@ It uses market behaviour such as:
 - price movement,
 - movement relative to historical volatility,
 - relative volume,
-- and recent technical context.
+- recent technical context.
 
 ### 2. Does it deserve this user's attention?
 
@@ -165,7 +189,7 @@ This produces **Personal Relevance**.
 It considers:
 
 - movement since that user last checked,
-- and the user's investor/attention profile.
+- the user's investor/attention profile.
 
 Conceptually:
 
@@ -190,11 +214,11 @@ The frontend displays the result and its decomposition; it does not independentl
 
 ---
 
-# Attention Score
+## Attention Score
 
 The scoring engine is deliberately **interpretable and deterministic**.
 
-## Objective Market Significance
+### Objective Market Significance
 
 | Signal | Maximum contribution |
 |---|---:|
@@ -212,7 +236,7 @@ MarketSignificance(User A)
 MarketSignificance(User B)
 ```
 
-## Personal Relevance
+### Personal Relevance
 
 | Signal | Maximum contribution |
 |---|---:|
@@ -244,7 +268,7 @@ A user's preferences may influence **what deserves their attention**, but they m
 
 ---
 
-# Why Rules Instead of Machine Learning?
+## Why Rules Instead of Machine Learning?
 
 An ML ranking model could combine many more signals.
 
@@ -257,7 +281,7 @@ For this problem, introducing ML would also introduce:
 - harder deterministic testing,
 - harder debugging,
 - model/version management,
-- and potentially false sophistication without proven product value.
+- potentially false sophistication without proven product value.
 
 For a financial attention product, an unexplained score can reduce trust.
 
@@ -275,7 +299,7 @@ A future model could assist feature weighting or ranking, but **explainability s
 
 ---
 
-# “Today” Is Not “Since You Checked”
+## “Today” Is Not “Since You Checked”
 
 This distinction is central to the product.
 
@@ -323,7 +347,7 @@ That means two users can have different context for exactly the same market obse
 
 ---
 
-# Why Doesn't Opening a Stock Reset the Baseline?
+## Why Doesn't Opening a Stock Reset the Baseline?
 
 Because:
 
@@ -343,21 +367,14 @@ Mark as caught up
 
 Only then is that user's baseline updated.
 
-This gives the state transition clear semantics:
-
 ```text
 Before acknowledgement
-
 last_viewed_price = previous acknowledged observation
 
-
 User opens Attention Lens
-
 last_viewed_price = unchanged
 
-
 User clicks "Mark as caught up"
-
 last_viewed_price = latest observation
 ```
 
@@ -365,9 +382,9 @@ The market history itself is never changed by this action.
 
 ---
 
-# Product Surfaces
+## Product Surfaces
 
-## Attention Desk
+### Attention Desk
 
 The main dashboard is designed around prioritization rather than a generic portfolio table.
 
@@ -379,29 +396,13 @@ It surfaces:
 - movement since last check,
 - objective market significance,
 - personal relevance,
-- and the strongest drivers behind the score.
+- strongest drivers behind the score.
 
 Quiet stocks remain available without competing visually with higher-attention events.
 
----
+### Attention Lens
 
-## Attention Lens
-
-Opening a company provides deeper analytical context.
-
-Depending on available history, the lens can expose:
-
-- current observation,
-- Today vs Since You Checked,
-- recent returns,
-- historical volatility,
-- relative volume,
-- recent-high context,
-- historical observations,
-- freshness,
-- provenance,
-- score decomposition,
-- and the user's acknowledgement state.
+Opening a company provides deeper analytical context, including available historical behaviour, Today vs Since You Checked, volatility, relative volume, recent-high context, freshness, provenance, score decomposition, and acknowledgement state.
 
 The goal is not to maximize the number of charts.
 
@@ -409,56 +410,29 @@ It is to answer:
 
 > **Why is this stock receiving this level of attention?**
 
----
-
-## Market Explorer
+### Market Explorer
 
 The Market Explorer is intentionally separate from the user's watchlist.
 
-A user can:
-
-- discover supported companies,
-- search the market catalog,
-- inspect available information,
-- and choose which companies belong in their personal watchlist.
+Users can discover supported companies, search the market catalog, inspect available information, and choose which companies belong in their watchlist.
 
 This is particularly important for new accounts.
 
-A new user should not receive a fabricated personalized history simply to make the dashboard look populated.
+A new user should not receive fabricated personalized history simply to make the dashboard look populated.
 
----
+### Profile
 
-## Profile
-
-The profile represents the user's attention context.
-
-It allows the product to distinguish:
-
-```text
-objective market significance
-```
-
-from:
-
-```text
-personal relevance
-```
+The profile represents the user's attention context and allows the product to distinguish objective market significance from personal relevance.
 
 The profile does not alter historical prices or objective market signals.
 
 ---
 
-# New User Experience
+## New User Experience
 
 A new account has no meaningful last-view history.
 
 Smart Watchlist does not manufacture one.
-
-A fresh user begins by exploring the market and constructing a watchlist.
-
-Personal context then develops from real interaction.
-
-Conceptually:
 
 ```text
 REGISTER
@@ -484,11 +458,10 @@ Meaningful personal baselines
 
 ---
 
-# System Architecture
+## System Architecture
 
 ```mermaid
 flowchart TB
-
     subgraph CLIENT["Frontend — React + TypeScript"]
         DESK["Attention Desk"]
         EXPLORER["Market Explorer"]
@@ -521,60 +494,32 @@ flowchart TB
 
     AUTH --> PG
     WATCH --> PG
-
     ANALYTICS --> ENGINE
     ENGINE --> MARKET
     ENGINE --> VIEW
-
     VIEW --> PG
     MARKET --> PG
     MARKET --> REDIS
-
     YF --> MARKET
 ```
 
----
+### Architectural Responsibilities
 
-# Architectural Responsibilities
+#### Frontend — React + TypeScript
 
-## Frontend — React + TypeScript
-
-Responsible for:
-
-- navigation,
-- interaction,
-- visualization,
-- responsive layout,
-- filtering,
-- accessibility,
-- loading/error states,
-- and presentation.
+Responsible for navigation, interaction, visualization, responsive layout, filtering, accessibility, loading/error states, and presentation.
 
 It is **not** the authoritative source for financial calculations.
 
----
+#### Backend — FastAPI
 
-## Backend — FastAPI
+Owns authentication, watchlist operations, analytics, market observations, user profiles, view state, and Attention Score computation.
 
-Owns application behaviour including:
+Business logic is kept outside UI components and route handlers where possible so it can be independently tested.
 
-- authentication,
-- watchlist operations,
-- analytics,
-- market observations,
-- user profiles,
-- view state,
-- and Attention Score computation.
+#### PostgreSQL — Source of Truth
 
-Business logic is kept outside UI components and route handlers where possible so that it can be independently tested.
-
----
-
-## PostgreSQL — Source of Truth
-
-Durable state belongs in PostgreSQL.
-
-This includes:
+Durable state belongs in PostgreSQL:
 
 ```text
 Users
@@ -585,40 +530,22 @@ Price snapshots
 Per-user view state
 ```
 
-The important property is:
+Critical user state survives browser refreshes, backend restarts, Redis restarts, and new sessions.
 
-```text
-browser refresh
-backend restart
-Redis restart
-new session
-        │
-        ▼
-critical user state survives
-```
-
----
-
-## Redis — Non-Authoritative Runtime State
+#### Redis — Non-Authoritative Runtime State
 
 Redis is intentionally not the source of truth.
 
-It may accelerate disposable/runtime behaviour, but losing Redis must not destroy:
-
-- watchlists,
-- profiles,
-- market history,
-- or user baselines.
+Losing Redis must not destroy watchlists, profiles, market history, or user baselines.
 
 > **Redis may affect performance. It must not affect truth.**
 
 ---
 
-# Market Data Pipeline
+## Market Data Pipeline
 
 ```mermaid
 flowchart LR
-
     Y["yfinance"]
     --> MAP["Ticker Mapping"]
     --> VALIDATE["Validation"]
@@ -641,9 +568,7 @@ Provider-specific ticker translation is isolated in:
 backend/app/providers/ticker_map.py
 ```
 
-This is deliberate.
-
-The application domain should understand:
+The application domain therefore understands symbols such as:
 
 ```text
 ASIANPAINT
@@ -652,13 +577,13 @@ M&M
 BAJAJ-AUTO
 ```
 
-rather than scattering provider-specific symbol conventions throughout scoring and analytics code.
+without scattering provider-specific conventions throughout scoring and analytics code.
 
 Changing the provider should therefore not require rewriting the Attention Engine.
 
 ---
 
-# Historical Data Import
+## Historical Data Import
 
 Historical observations can be imported with:
 
@@ -676,7 +601,7 @@ docker compose exec -T backend \
   --period 1y
 ```
 
-The importer:
+The importer follows:
 
 ```text
 Resolve provider ticker
@@ -696,15 +621,13 @@ Persist only new observations
 
 It is designed to be safely rerunnable.
 
-Repeated ingestion should not intentionally create duplicate observations for the same stock/timestamp.
-
 ---
 
-# Data Provenance & Freshness
+## Data Provenance & Freshness
 
 A financial number without context can create false confidence.
 
-Persisted observations therefore retain provenance information such as:
+Persisted observations retain provenance information such as:
 
 ```text
 observed_at
@@ -725,7 +648,6 @@ That distinction is surfaced rather than hidden.
 
 ```mermaid
 flowchart TD
-
     REQUEST["Market Request"]
     --> PROVIDER{"Provider succeeds?"}
 
@@ -734,7 +656,6 @@ flowchart TD
     STORE --> RETURN["Return with provenance"]
 
     PROVIDER -->|"No"| OLD{"Persisted observation exists?"}
-
     OLD -->|"Yes"| STALE["Use last real observation<br/>and expose freshness"]
     OLD -->|"No"| EMPTY["Expose unavailable state"]
 
@@ -743,37 +664,31 @@ flowchart TD
     EMPTY --> UI
 ```
 
-The guiding rule is:
-
 > **Provider failure must not silently become fabricated market data.**
 
-Smart Watchlist does not claim exchange-grade tick-by-tick real-time data.
-
-Freshness depends on the upstream provider and ingestion cadence.
+Smart Watchlist does not claim exchange-grade tick-by-tick real-time data. Freshness depends on the upstream provider and ingestion cadence.
 
 ---
 
-# Demo Personas
+## Demo Personas
 
 Two demo identities make personalization easy to inspect.
 
-## Momentum Investor
+### Momentum Investor
 
 ```text
 Email:    demo@smartwatchlist.dev
 Password: demo1234
 ```
 
-## Stability Investor
+### Stability Investor
 
 ```text
 Email:    demo.stability@smartwatchlist.dev
 Password: demo1234
 ```
 
-The purpose of the two users is not to create two different markets.
-
-It is to demonstrate the opposite:
+The purpose is not to create two different markets:
 
 ```text
 Same market observations
@@ -787,7 +702,7 @@ Objective market significance remains market-driven.
 
 ---
 
-# Reproducible Demo State
+## Reproducible Demo State
 
 The demo separates **real market history** from **simulated user behaviour**.
 
@@ -798,8 +713,6 @@ Controlled user view-state baselines
               ↓
 Reproducible returning-user scenario
 ```
-
-This allows the product idea to be demonstrated without fabricating market observations.
 
 Reset demo user baselines:
 
@@ -813,7 +726,7 @@ Advance/catch up the demo users:
 docker compose exec -T backend python scripts/demo.py advance
 ```
 
-The important invariant is:
+The invariant is:
 
 ```text
 demo state command
@@ -825,7 +738,7 @@ demo state command
 
 ---
 
-# Key Engineering Decisions
+## Key Engineering Decisions
 
 | Decision | Why | Trade-off |
 |---|---|---|
@@ -842,48 +755,23 @@ demo state command
 
 ---
 
-# Why One Primary Watchlist?
+## Why One Primary Watchlist?
 
-Multiple named lists such as:
+Multiple named lists such as Long Term, Momentum, Banking, or Research would be useful.
 
-```text
-Long Term
-Momentum
-Banking
-Research
-```
-
-would be useful.
-
-But they primarily introduce another organizational layer:
-
-```text
-Watchlist
-  ├── name
-  ├── owner
-  └── memberships
-```
+But they primarily introduce another organizational layer.
 
 The harder problem chosen for this implementation was:
 
 > **How does the system know what meaningfully changed since a user last checked?**
 
-Engineering effort was therefore concentrated on:
-
-- meaningful-change detection,
-- historical analytics,
-- per-user state,
-- personalization,
-- real market ingestion,
-- resilience,
-- explainability,
-- and explicit state semantics.
+Engineering effort was therefore concentrated on meaningful-change detection, historical analytics, per-user state, personalization, real market ingestion, resilience, explainability, and explicit state semantics.
 
 Named watchlists are a natural extension of the existing model rather than a requirement for demonstrating the central architecture.
 
 ---
 
-# Reliability & Edge Cases
+## Reliability & Edge Cases
 
 | Situation | Behaviour |
 |---|---|
@@ -904,9 +792,7 @@ Named watchlists are a natural extension of the existing model rather than a req
 
 ---
 
-# Architectural Invariants
-
-Several rules are intentionally protected throughout the application.
+## Architectural Invariants
 
 ### 1. Market facts are user-independent
 
@@ -926,7 +812,7 @@ personal_relevance(User A)
 personal_relevance(User B)
 ```
 
-when their profiles or baselines differ.
+when profiles or baselines differ.
 
 ### 3. Backend owns scoring
 
@@ -954,7 +840,7 @@ Repeated imports are designed not to duplicate already-persisted stock/timestamp
 
 ---
 
-# Scaling the Architecture
+## Scaling the Architecture
 
 The implementation intentionally avoids premature distributed-system complexity.
 
@@ -962,7 +848,6 @@ Its boundaries nevertheless support a larger deployment.
 
 ```mermaid
 flowchart LR
-
     PROVIDERS["Market Providers"]
     --> INGEST["Ingestion Workers"]
     --> QUEUE["Queue / Event Stream"]
@@ -978,19 +863,9 @@ flowchart LR
     API --> CACHE
 ```
 
-## Avoiding duplicate market work
+A naive architecture might fetch the same stock repeatedly for every user watching it.
 
-A naive architecture might do:
-
-```text
-for every user:
-    for every watched stock:
-        fetch market data
-```
-
-That becomes wasteful because many users watch the same companies.
-
-A scalable model separates shared market computation from user-specific relevance:
+A scalable model instead separates shared market computation from user-specific relevance:
 
 ```text
 Unique watched symbols
@@ -1014,8 +889,6 @@ personal context     personal context
 attention score     attention score
 ```
 
-This is one reason market state and user state are separate domains.
-
 At larger scale, the architecture could add:
 
 - asynchronous ingestion workers,
@@ -1026,13 +899,13 @@ At larger scale, the architecture could add:
 - circuit breakers,
 - dedicated time-series storage,
 - multi-provider reconciliation,
-- and stateless API replicas.
+- stateless API replicas.
 
 These are not introduced prematurely into the current implementation.
 
 ---
 
-# Technology Stack
+## Technology Stack
 
 | Layer | Technology |
 |---|---|
@@ -1053,23 +926,14 @@ These are not introduced prematurely into the current implementation.
 
 ---
 
-# Running Locally
+## Running Locally
 
-## Recommended: Docker Compose
-
-Docker Compose provides a reproducible environment for the:
-
-```text
-Frontend
-Backend
-PostgreSQL
-Redis
-```
+### Recommended: Docker Compose
 
 From the repository root:
 
 ```bash
-docker compose up --build
+docker compose up --build -d
 ```
 
 Check the running services:
@@ -1096,70 +960,56 @@ Expected shape:
 }
 ```
 
-Then open the frontend in the browser.
+Open:
 
-```text
-http://localhost:5173
-```
+**http://localhost:5173**
 
 ---
 
-# Verification
+## Verification
 
-## Backend
-
-Run:
+### Backend
 
 ```bash
 docker compose exec -T backend pytest tests -q
 ```
 
-Final verified checkpoint:
+Verified checkpoint:
 
 ```text
 115 passed
 ```
 
-The test suite covers areas including:
+The suite covers authentication, watchlists, analytics, scoring, market ingestion, historical imports, real-market pipeline behaviour, view-state semantics, demo behaviour, and scoring regressions.
 
-- authentication,
-- watchlists,
-- analytics,
-- scoring,
-- market ingestion,
-- historical imports,
-- real-market pipeline behaviour,
-- view-state semantics,
-- demo behaviour,
-- and scoring regressions.
+### Frontend
 
----
+The frontend is built and run inside the recommended Docker environment.
 
-## Frontend
-
-Run:
+For independent local frontend development outside Docker, install the frontend dependencies first:
 
 ```bash
+npm --prefix frontend ci
 npm --prefix frontend run build
 ```
 
-Final verified checkpoint:
+A local Node.js installation is required only for this non-Docker development workflow.
+
+Verified build:
 
 ```text
 tsc -b && vite build
 ✓ built successfully
 ```
 
----
-
-## Repository hygiene
+### Repository Hygiene
 
 ```bash
 git diff --check
 git status
 ```
 
-Final verified checkpoint:
+Verified checkpoint:
 
 ```text
 git diff --check
@@ -1171,7 +1021,7 @@ git status
 
 ---
 
-# Repository Structure
+## Repository Structure
 
 ```text
 smart-watchlist/
@@ -1206,78 +1056,33 @@ smart-watchlist/
 
 ---
 
-# What I Would Build Next
+## What I Would Build Next
 
 The project deliberately stops before becoming a full trading terminal.
 
 The most natural extensions are:
 
-## 1. Multiple Named Watchlists
+1. **Multiple Named Watchlists**  
+   Organize companies by intent while keeping the Attention Engine unchanged.
 
-Allow users to organize companies by intent:
+2. **Production-Grade Market Provider**  
+   Replace or supplement yfinance behind the existing provider abstraction.
 
-```text
-Long Term
-Momentum
-Banking
-Research
-```
+3. **Attention Notifications**  
+   Notify when an Attention Score crosses a meaningful threshold rather than for every small movement.
 
-The Attention Engine could remain unchanged while operating across multiple membership collections.
+4. **Attention History**  
+   Preserve when and why a company became important.
 
-## 2. Production-Grade Market Provider
+5. **Verified Company News**  
+   Introduce news only with reliable sourcing, timestamps, provenance, and freshness.
 
-Replace or supplement yfinance behind the existing provider abstraction.
-
-The domain layer should not need to change.
-
-## 3. Attention Notifications
-
-Instead of alerting users for every price movement:
-
-```text
-Attention Score crosses meaningful threshold
-                    ↓
-              notify user
-```
-
-This follows the same attention-first philosophy as the dashboard.
-
-## 4. Attention History
-
-Track:
-
-```text
-Why did this company become important?
-When did its attention state change?
-Which signal caused it?
-```
-
-## 5. Verified Company News
-
-News could become another objective context signal if it has:
-
-- reliable sourcing,
-- timestamps,
-- provenance,
-- and explicit freshness.
-
-## 6. Multi-Provider Reconciliation
-
-A production market system could compare multiple providers and explicitly resolve:
-
-```text
-missing observations
-delayed observations
-conflicting prices
-provider outages
-```
-
-without changing the user-facing attention model.
+6. **Multi-Provider Reconciliation**  
+   Explicitly resolve missing, delayed, conflicting, or unavailable provider observations.
 
 ---
 
-# What Smart Watchlist Deliberately Does Not Do
+## What Smart Watchlist Deliberately Does Not Do
 
 Smart Watchlist is not:
 
@@ -1285,7 +1090,7 @@ Smart Watchlist is not:
 - a stock-price predictor,
 - an investment adviser,
 - a buy/sell recommendation engine,
-- or an opaque AI stock picker.
+- an opaque AI stock picker.
 
 Its responsibility is narrower:
 
@@ -1309,7 +1114,7 @@ That boundary is deliberate.
 
 ---
 
-# Final Perspective
+## Final Perspective
 
 Most watchlists optimize for showing more market information.
 
@@ -1328,7 +1133,7 @@ What this user has already seen
             +
 What is relevant to this user
             ↓
-      Explainable Attention
+       Explainable Attention
 ```
 
 while keeping **market facts, personalization, state, and provenance explicitly separate**.
