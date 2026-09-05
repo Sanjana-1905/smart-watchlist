@@ -18,7 +18,7 @@ It does not try to predict stocks or recommend trades.
 
 ---
 
-## ⚡ Quick Start
+##  Quick Start
 
 ```bash
 git clone https://github.com/Sanjana-1905/smart-watchlist.git
