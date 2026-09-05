@@ -35,7 +35,6 @@ IMPORTANT:
 
 import sys
 import uuid
-from collections import defaultdict
 from datetime import datetime, timezone, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -142,11 +141,9 @@ SCENARIO_FINAL = {
 }
 
 
-# The feature engine calculates current-session volume as the SUM of all
-# snapshots in the session.
-#
-# Give 20% of the target day's volume to the intermediate observation and
-# the remaining 80% to the final observation.
+# Production uses the latest observation as cumulative session volume.
+# The intermediate observation has 20% of the target volume; the final
+# observation contains the full target, not the remaining increment.
 INTERMEDIATE_VOLUME_FRACTION = 0.20
 
 
@@ -260,8 +257,8 @@ def get_historical_session_volumes(db, stock_id):
     """
     Convert historical raw snapshots into daily IST trading-session volumes.
 
-    The production feature engine treats a session's volume as the SUM of
-    snapshot volumes in that session, so the demo must use the same model.
+    Use the latest cumulative observation in each IST session, matching
+    the production feature engine.
     """
 
     snapshots = get_historical_snapshots_before_today(
@@ -269,7 +266,7 @@ def get_historical_session_volumes(db, stock_id):
         stock_id,
     )
 
-    grouped = defaultdict(float)
+    grouped = {}
 
     for snapshot in snapshots:
         timestamp = snapshot.timestamp
@@ -283,7 +280,7 @@ def get_historical_session_volumes(db, stock_id):
             IST
         ).date()
 
-        grouped[session_date] += float(
+        grouped[session_date] = float(
             snapshot.volume
         )
 
@@ -1087,15 +1084,8 @@ def cmd_advance():
                     "is missing. Run reset first."
                 )
 
-            intermediate_volume = int(
-                intermediate_snapshot.volume
-            )
-
-            final_volume = max(
-                target_total_volume
-                - intermediate_volume,
-                1,
-            )
+            # Latest observation represents the full cumulative session volume.
+            final_volume = max(target_total_volume, 1)
 
             # --------------------------------------------------------------
             # FINAL TIMESTAMP

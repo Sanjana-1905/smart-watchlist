@@ -1,12 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import type { Stock, PriceSnapshot, WatchlistItem } from '../types/market';
 import { api } from '../services/api';
+import AttentionScore from '../components/AttentionScore';
+import DataFreshness from '../components/DataFreshness';
 import PriceChart from '../components/PriceChart';
 
 export default function StockDetail() {
   const { symbol } = useParams<{ symbol: string }>();
+  return <StockDetailContent key={symbol} symbol={symbol} />;
+}
+
+function StockDetailContent({ symbol }: { symbol: string | undefined }) {
   const [stock, setStock] = useState<Stock | null>(null);
   const [history, setHistory] = useState<PriceSnapshot[]>([]);
   const [attention, setAttention] = useState<WatchlistItem | null>(null);
@@ -15,42 +21,43 @@ export default function StockDetail() {
   const [marking, setMarking] = useState(false);
   const [justViewed, setJustViewed] = useState(false);
 
+  const [markError, setMarkError] = useState<string | null>(null);
+  const markInFlight = useRef(false);
+
   useEffect(() => {
-    if (symbol) load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let active = true;
+    if (!symbol) { setError('Stock not found'); setLoading(false); return; }
+    // Loading a detail page is read-only. Baselines change only on the button action.
+    Promise.all([api.getStock(symbol), api.getStockHistory(symbol), api.getWatchlistChanges()])
+      .then(([stockRes, historyRes, changesRes]) => {
+        if (!active) return;
+        setStock(stockRes);
+        setHistory(historyRes);
+        setAttention(changesRes.items.find(i => i.symbol === symbol.toUpperCase()) ?? null);
+      })
+      .catch(err => { if (active) setError(err instanceof Error ? err.message : 'Failed to load stock'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, [symbol]);
 
-  const load = async () => {
-    if (!symbol) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const [stockRes, historyRes, changesRes] = await Promise.all([
-        api.getStock(symbol),
-        api.getStockHistory(symbol),
-        api.getWatchlistChanges(),
-      ]);
-      setStock(stockRes);
-      setHistory(historyRes);
-      const match = changesRes.items.find((i) => i.symbol === symbol.toUpperCase());
-      setAttention(match ?? null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load stock');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleMarkViewed = async () => {
-    if (!symbol) return;
+    if (!symbol || markInFlight.current || justViewed) return;
+    markInFlight.current = true;
     setMarking(true);
+    setMarkError(null);
     try {
       await api.markViewed(symbol);
       setJustViewed(true);
-      await load();
-    } catch {
-      // non-fatal for MVP
+      try {
+        const changes = await api.getWatchlistChanges();
+        setAttention(changes.items.find(i => i.symbol === symbol.toUpperCase()) ?? null);
+      } catch (err) {
+        setMarkError(`Caught-up state saved, but refresh failed: ${err instanceof Error ? err.message : 'Please reload the page.'}`);
+      }
+    } catch (err) {
+      setMarkError(err instanceof Error ? err.message : 'Failed to mark as caught up');
     } finally {
+      markInFlight.current = false;
       setMarking(false);
     }
   };
@@ -78,119 +85,110 @@ export default function StockDetail() {
     'text-gray-400';
 
   return (
-    <div className="min-h-screen bg-white">
-      <header className="border-b border-gray-200 px-8 py-6">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900">
+    <div className="min-h-screen bg-slate-50 font-sans pb-20">
+      <header className="bg-white border-b border-slate-200 px-4 sm:px-8 py-4 sticky top-0 z-10 shadow-sm">
+        <div className="max-w-3xl mx-auto flex flex-wrap gap-3 items-center justify-between">
+          <Link to="/" className="flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors">
             <ArrowLeft size={16} />
             Back to watchlist
           </Link>
           {attention && (
-            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${levelPill}`}>
+            <span className={`px-2.5 py-1 rounded text-[11px] font-bold tracking-wider ${levelPill}`}>
               {level}
             </span>
           )}
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-8 py-12 space-y-10">
-        <div>
-          <p className="text-sm text-gray-600">{stock.company_name}</p>
-          <h1 className="text-3xl font-bold text-gray-900">{stock.symbol}</h1>
-          <p className="text-xs text-gray-500 mt-1">
-            {stock.exchange}{stock.sector ? ` · ${stock.sector}` : ''}
-          </p>
-        </div>
+      <main className="max-w-3xl mx-auto px-4 sm:px-8 py-10 space-y-12">
+        {/* FACT SECTION */}
+        <section className="bg-white rounded-xl border border-slate-200 p-4 sm:p-8 shadow-sm">
+          <div className="mb-6">
+            <h1 className="text-3xl font-bold text-slate-900 leading-tight">{stock.symbol}</h1>
+            <p className="text-sm text-slate-500 mt-1">{stock.company_name}</p>
+          </div>
 
-        <div className="space-y-3">
-          <p className="text-4xl font-bold text-gray-900">₹{currentPrice.toFixed(2)}</p>
-          <div className="flex gap-8 text-sm">
-            {attention && (
-              <div>
-                <p className="text-gray-600">Today</p>
-                <p className={`text-lg font-semibold ${attention.session_change_pct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {attention.session_change_pct >= 0 ? '+' : ''}{attention.session_change_pct.toFixed(2)}%
-                </p>
-              </div>
-            )}
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-8 mb-8">
             <div>
-              <p className="text-gray-600">Since you checked</p>
+              <p className="text-3xl sm:text-4xl break-words font-bold text-slate-900 leading-none">₹{currentPrice.toFixed(2)}</p>
+              {attention && (
+                <div className="flex flex-wrap items-center gap-2 mt-3">
+                  <span className={`text-lg font-semibold ${attention.session_change_pct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {attention.session_change_pct >= 0 ? '+' : ''}{attention.session_change_pct.toFixed(2)}%
+                  </span>
+                  <span className="text-sm text-slate-500">Today · vs previous close</span>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 sm:p-5 min-w-0">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Since you checked</p>
               {attention?.since_last_view_pct != null ? (
-                <p className={`text-lg font-semibold ${attention.since_last_view_pct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {attention.since_last_view_pct >= 0 ? '+' : ''}{attention.since_last_view_pct.toFixed(2)}%
-                </p>
+                <>
+                  <p className={`text-2xl font-bold ${attention.since_last_view_pct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {attention.since_last_view_pct >= 0 ? '+' : ''}{attention.since_last_view_pct.toFixed(2)}%
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1">vs your last view</p>
+                </>
               ) : (
-                <p className="text-lg font-semibold text-gray-400">No baseline yet</p>
+                <p className="text-lg font-medium text-slate-400 mt-1">No baseline yet</p>
               )}
             </div>
           </div>
-        </div>
 
-        {history.length >= 2 && (
-          <div>
-            <PriceChart data={history} />
-          </div>
-        )}
+          {history.length >= 2 && (
+            <div className="mt-4">
+              <PriceChart data={history} />
+            </div>
+          )}
+        </section>
 
+        {/* INTERPRETATION SECTION */}
         {attention && attention.reasons.length > 0 && (
-          <div className="pt-6 border-t">
-            <p className="text-xs font-semibold text-gray-900 uppercase tracking-wide mb-4">Why this matters</p>
-            <div className="space-y-3">
+          <section className="bg-white rounded-xl border border-slate-200 p-4 sm:p-8 shadow-sm">
+            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest mb-6">Why this matters</h2>
+            <ul className="space-y-4">
               {attention.reasons.map((reason, idx) => (
-                <div key={idx} className="flex gap-3 text-sm">
-                  <span className="text-gray-400 font-semibold">{String(idx + 1).padStart(2, '0')}</span>
-                  <p className="text-gray-700">{reason.message}</p>
-                </div>
+                <li key={idx} className="flex gap-4 items-start">
+                  <span className="text-slate-400 mt-0.5">•</span>
+                  <p className="text-slate-700 leading-relaxed text-base">{reason.message}</p>
+                </li>
               ))}
-            </div>
-          </div>
+            </ul>
+          </section>
         )}
 
+        {/* PERSONALIZATION SECTION */}
         {attention && (
-          <div className="pt-6 border-t space-y-3">
-            <div className="flex justify-between items-baseline">
-              <span className="text-sm text-gray-600">Attention score</span>
-              <span className="text-2xl font-bold text-gray-900">{attention.attention_score.toFixed(0)}</span>
-            </div>
-            <div className="w-full bg-gray-200 h-1 rounded-full overflow-hidden">
-              <div className="bg-gray-900 h-full" style={{ width: `${Math.min(attention.attention_score, 100)}%` }} />
-            </div>
-            <div className="text-xs text-gray-500 space-y-1 pt-1">
-              <div className="flex justify-between">
-                <span>Objective</span>
-                <span>{attention.objective_score.toFixed(0)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Your preferences</span>
-                <span>+{attention.preference_fit.toFixed(0)}</span>
-              </div>
-            </div>
-            <p className="text-xs text-gray-500 pt-2 italic">
-              This ranks attention. It's not a buy/sell recommendation.
+          <section className="bg-white rounded-xl border border-slate-200 p-4 sm:p-8 shadow-sm">
+            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest mb-6">Attention Score</h2>
+
+            <AttentionScore objective={attention.objective_score} preference={attention.preference_fit} final={attention.attention_score} level={attention.attention_level} />
+
+            <p className="text-sm text-slate-500 italic mt-6 bg-slate-50 p-4 rounded-lg border border-slate-100">
+              Personal relevance reflects movement since your last view and your preferences. Market facts remain the same for everyone.
             </p>
-          </div>
+          </section>
         )}
 
-        <div className="pt-6 border-t flex items-center justify-between">
-          <div className="text-xs text-gray-500">
+        {/* DATA SOURCE & ACTIONS */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4">
+          <div className="text-xs font-medium text-slate-400">
             {attention ? (
-              <span>
-                {attention.freshness.status} ·{' '}
-                {attention.freshness.age_minutes != null ? `${attention.freshness.age_minutes} min ago` : 'just now'} ·{' '}
-                {attention.freshness.source}
-              </span>
+              <DataFreshness freshness={attention.freshness} />
             ) : (
               <span>Not on your watchlist</span>
             )}
           </div>
           <button
             onClick={handleMarkViewed}
-            disabled={marking}
-            className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 disabled:opacity-50"
+            disabled={marking || justViewed}
+            className="w-full sm:w-auto px-6 py-3 bg-slate-900 text-white text-sm font-semibold rounded-lg hover:bg-slate-800 disabled:opacity-50 transition-colors shadow-sm"
           >
-            {marking ? 'Marking...' : justViewed ? 'Viewed ✓' : 'Mark as viewed'}
+            {marking ? 'Marking...' : justViewed ? '✓ Caught up' : 'Mark as caught up'}
           </button>
         </div>
+        {markError && <p role="alert" className="text-sm text-red-700">{markError}</p>}
       </main>
     </div>
   );

@@ -137,7 +137,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ symbol }),
     });
-    if (!res.ok) throw new Error('Failed to mark viewed');
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error?.message || 'Failed to mark as caught up');
+    }
   },
 
   async addWatchlistStock(symbol: string): Promise<void> {

@@ -5,51 +5,24 @@ interface AttentionScoreProps {
   level: 'LOW' | 'MEDIUM' | 'HIGH';
 }
 
-export default function AttentionScore({
-  objective,
-  preference,
-  final,
-  level,
-}: AttentionScoreProps) {
-  const levelColor = {
-    HIGH: 'bg-gray-900 text-white',
-    MEDIUM: 'border border-gray-400 text-gray-700',
-    LOW: 'text-gray-400',
-  };
-
+export default function AttentionScore({ objective, preference, final, level }: AttentionScoreProps) {
   return (
     <div className="space-y-3">
-      <div className="flex justify-between items-baseline">
-        <span className="text-sm text-gray-600">Attention score</span>
-        <span className={`text-2xl font-bold ${level === 'LOW' ? 'text-gray-400' : 'text-gray-900'}`}>
-          {final.toFixed(0)}
-        </span>
-      </div>
-
-      <div className="w-full bg-gray-200 h-1 rounded-full overflow-hidden">
-        <div className="bg-gray-900 h-full" style={{ width: `${Math.min(final, 100)}%` }} />
-      </div>
-
-      <div className="flex items-center gap-2">
-        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${levelColor[level]}`}>
-          {level}
-        </span>
-      </div>
-
-      <div className="text-xs text-gray-500 space-y-1 pt-2 border-t">
-        <div className="flex justify-between">
-          <span>Objective</span>
-          <span>{objective.toFixed(0)}</span>
+      <dl className="space-y-2 text-sm text-slate-600">
+        <div className="flex justify-between gap-3">
+          <dt>Objective significance</dt><dd>{objective.toFixed(1)}</dd>
         </div>
-        <div className="flex justify-between">
-          <span>Your preferences</span>
-          <span className="text-gray-700">+{preference.toFixed(0)}</span>
+        <div className="flex justify-between gap-3">
+          <dt>Personal relevance</dt><dd>+{preference.toFixed(1)}</dd>
         </div>
-      </div>
-
-      <p className="text-xs text-gray-500 pt-2 italic">
-        This ranks attention. It's not a buy/sell recommendation.
-      </p>
+        <div className="flex flex-wrap justify-between items-baseline gap-3 border-t border-slate-100 pt-3">
+          <dt className="font-semibold text-slate-900">Final attention</dt>
+          <dd className={`text-2xl font-bold ${level === 'LOW' ? 'text-slate-500' : 'text-slate-900'}`}>
+            {final.toFixed(1)} <span className="text-xs font-semibold">{level}</span>
+          </dd>
+        </div>
+      </dl>
+      {objective + preference > 100 && <p className="text-xs text-slate-500">Final attention is capped at 100.</p>}
     </div>
   );
 }

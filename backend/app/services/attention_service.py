@@ -4,8 +4,9 @@ Pure attention scoring engine.
 No FastAPI, no SQLAlchemy, no HTTP — just math and logic.
 This is the core IP of the product.
 
-Objective score: 0-100, based on market facts alone.
-Preference fit: 0-15, based on user preferences.
+Objective score: 0-80, based on market facts alone.
+Personal relevance: 0-35 (since-view movement 0-20 + profile bonus 0-15).
+The legacy preference_fit response field carries combined personal relevance.
 Final score: min(objective + preference_fit, 100).
 """
 
@@ -42,7 +43,7 @@ class AttentionReason:
 class AttentionResult:
     """Final attention score and breakdown."""
     objective_score: float
-    preference_fit: float
+    preference_fit: float  # Personal relevance: since-view points + profile bonus
     final_score: float
     level: str              # LOW, MEDIUM, HIGH
     reasons: list[AttentionReason]
@@ -167,21 +168,20 @@ def calculate_technical_points(new_20d_high: bool) -> tuple[float, AttentionReas
 
 def calculate_objective_score(features: MarketFeatures) -> tuple[float, list[AttentionReason]]:
     """
-    Calculate objective attention score (0-100) from market facts.
+    Calculate objective market significance (0-80) from market facts.
     
     Same market facts → same score, always.
-    Independent of user preferences.
+    Independent of user preferences and last-view state.
     """
     unusual_pts, unusual_reason = calculate_unusual_return_points(
         features.session_return,
         features.volatility_20d,
     )
     volume_pts, volume_reason = calculate_volume_points(features.volume_ratio)
-    view_pts, view_reason = calculate_since_view_points(features.since_view_return)
     tech_pts, tech_reason = calculate_technical_points(features.new_20d_high)
     
     objective_score = min(
-        unusual_pts + volume_pts + view_pts + tech_pts,
+        unusual_pts + volume_pts + tech_pts,
         100.0,
     )
     
@@ -191,8 +191,6 @@ def calculate_objective_score(features: MarketFeatures) -> tuple[float, list[Att
         reasons.append(unusual_reason)
     if volume_reason:
         reasons.append(volume_reason)
-    if view_reason:
-        reasons.append(view_reason)
     if tech_reason:
         reasons.append(tech_reason)
     
@@ -275,6 +273,17 @@ def calculate_preference_fit(
     return fit, reasons
 
 
+def calculate_personal_relevance(
+    features: MarketFeatures,
+    preferences: UserPreferences,
+) -> tuple[float, list[AttentionReason]]:
+    """Since-view movement (0-20) plus the existing profile bonus (0-15)."""
+    view_points, view_reason = calculate_since_view_points(features.since_view_return)
+    profile_bonus, profile_reasons = calculate_preference_fit(features, preferences)
+    reasons = ([view_reason] if view_reason is not None else []) + profile_reasons
+    return view_points + profile_bonus, reasons
+
+
 # ============================================================================
 # FINAL SCORING
 # ============================================================================
@@ -304,7 +313,7 @@ def calculate_attention(
         AttentionResult with objective score, preference fit, final score, level, and reasons
     """
     objective_score, objective_reasons = calculate_objective_score(features)
-    preference_fit, preference_reasons = calculate_preference_fit(features, preferences)
+    preference_fit, preference_reasons = calculate_personal_relevance(features, preferences)
     
     final_score = min(objective_score + preference_fit, 100.0)
     level = classify_level(final_score)

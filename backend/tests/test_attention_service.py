@@ -17,6 +17,7 @@ from app.services.attention_service import (
     calculate_attention,
     calculate_objective_score,
     calculate_preference_fit,
+    calculate_personal_relevance,
     classify_level,
 )
 
@@ -125,10 +126,13 @@ class TestObjectiveScoring:
         )
         score, reasons = calculate_objective_score(features)
         
-        # Unusual: min(0.01/0.02 / 3, 1) * 45 ≈ 7.5
-        # Since-view: min(0.05/0.05, 1) * 20 = 20
-        # Total ≈ 27.5
-        assert 25 <= score <= 30, f"Expected ~27.5, got {score}"
+        assert score == pytest.approx(7.5)
+        assert "SINCE_VIEW" not in {r.type for r in reasons}
+        relevance, reasons = calculate_personal_relevance(
+            features, UserPreferences("BALANCED", "BALANCED", "LONG_TERM")
+        )
+        assert relevance == 20
+        assert [r.type for r in reasons] == ["SINCE_VIEW"]
 
     def test_since_view_no_reason_when_small(self):
         """Small change (< 1%) contributes points but no reason."""
@@ -271,8 +275,10 @@ class TestPreferenceFit:
             time_horizon="SHORT_TERM",
         )
 
+        bonus, _ = calculate_preference_fit(features, pref_aligned)
+        assert bonus == 15
         result = calculate_attention(features, pref_aligned)
-        assert result.preference_fit <= 15.0, "Preference fit should not exceed +15"
+        assert result.preference_fit == 35
 
 
 class TestFinalScoring:

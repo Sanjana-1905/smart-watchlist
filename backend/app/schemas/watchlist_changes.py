@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 
 
@@ -26,7 +26,7 @@ class WatchlistChangeItemOut(BaseModel):
     since_last_view_pct: float | None
     
     objective_score: float
-    preference_fit: float
+    preference_fit: float = Field(description="Personal relevance: since-view movement (0-20) plus profile bonus (0-15)")
     attention_score: float
     attention_level: str
     
