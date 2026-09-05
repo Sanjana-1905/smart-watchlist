@@ -1,16 +1,18 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { WatchlistResponse } from '../types/market';
+import type { WatchlistResponse, BasicWatchlistItem } from '../types/market';
 import { api } from '../services/api';
 import Dashboard from './Dashboard';
 
 export default function DashboardPage() {
+  const [membership, setMembership] = useState<BasicWatchlistItem[]>([]);
   const [data, setData] = useState<WatchlistResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
-      const result = await api.getWatchlistChanges();
+      const [result, members] = await Promise.all([api.getWatchlistChanges(), api.getWatchlist()]);
+      setMembership(members);
       setData(result);
       setError(null);
     } catch (err) {
@@ -26,5 +28,5 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  return <Dashboard data={data} loading={loading} error={error} onRefetch={fetchData} />;
+  return <Dashboard membership={membership} data={data} loading={loading} error={error} onRefetch={fetchData} />;
 }

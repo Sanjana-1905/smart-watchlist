@@ -1,195 +1,69 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
-import type { Stock, PriceSnapshot, WatchlistItem } from '../types/market';
+import type { Analytics } from '../types/analytics';
 import { api } from '../services/api';
 import AttentionScore from '../components/AttentionScore';
 import DataFreshness from '../components/DataFreshness';
-import PriceChart from '../components/PriceChart';
+import ReasonsList from '../components/ReasonsList';
+import TemporalLens, { type Lens } from '../components/TemporalLens';
+import TemporalTimeline from '../components/TemporalTimeline';
+import MarketDelta from '../components/MarketDelta';
+import RelatedContext from '../components/RelatedContext';
+import ShowMath from '../components/ShowMath';
+import AnalysisChart from '../components/AnalysisChart';
 
 export default function StockDetail() {
   const { symbol } = useParams<{ symbol: string }>();
   return <StockDetailContent key={symbol} symbol={symbol} />;
 }
-
 function StockDetailContent({ symbol }: { symbol: string | undefined }) {
-  const [stock, setStock] = useState<Stock | null>(null);
-  const [history, setHistory] = useState<PriceSnapshot[]>([]);
-  const [attention, setAttention] = useState<WatchlistItem | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<Analytics | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lens, setLens] = useState<Lens>('today');
   const [marking, setMarking] = useState(false);
   const [justViewed, setJustViewed] = useState(false);
-
   const [markError, setMarkError] = useState<string | null>(null);
   const markInFlight = useRef(false);
-
   useEffect(() => {
     let active = true;
-    if (!symbol) { setError('Stock not found'); setLoading(false); return; }
-    // Loading a detail page is read-only. Baselines change only on the button action.
-    Promise.all([api.getStock(symbol), api.getStockHistory(symbol), api.getWatchlistChanges()])
-      .then(([stockRes, historyRes, changesRes]) => {
-        if (!active) return;
-        setStock(stockRes);
-        setHistory(historyRes);
-        setAttention(changesRes.items.find(i => i.symbol === symbol.toUpperCase()) ?? null);
-      })
-      .catch(err => { if (active) setError(err instanceof Error ? err.message : 'Failed to load stock'); })
-      .finally(() => { if (active) setLoading(false); });
+    if (!symbol) { setError('Stock not found'); return; }
+    api.getAnalytics(symbol).then(result => { if (active) setData(result); })
+      .catch(err => { if (active) setError(err instanceof Error ? err.message : 'Failed to load analytics'); });
     return () => { active = false; };
   }, [symbol]);
-
-  const handleMarkViewed = async () => {
+  async function markViewed() {
     if (!symbol || markInFlight.current || justViewed) return;
-    markInFlight.current = true;
-    setMarking(true);
-    setMarkError(null);
+    markInFlight.current = true; setMarking(true); setMarkError(null);
     try {
-      await api.markViewed(symbol);
-      setJustViewed(true);
-      try {
-        const changes = await api.getWatchlistChanges();
-        setAttention(changes.items.find(i => i.symbol === symbol.toUpperCase()) ?? null);
-      } catch (err) {
-        setMarkError(`Caught-up state saved, but refresh failed: ${err instanceof Error ? err.message : 'Please reload the page.'}`);
-      }
-    } catch (err) {
-      setMarkError(err instanceof Error ? err.message : 'Failed to mark as caught up');
-    } finally {
-      markInFlight.current = false;
-      setMarking(false);
-    }
-  };
-
-  if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-gray-600">Loading...</div>;
+      await api.markViewed(symbol); setJustViewed(true);
+      try { setData(await api.getAnalytics(symbol)); }
+      catch (err) { setMarkError(`Caught-up state saved, but refresh failed: ${err instanceof Error ? err.message : 'Please reload.'}`); }
+    } catch (err) { setMarkError(err instanceof Error ? err.message : 'Failed to mark as caught up'); }
+    finally { markInFlight.current = false; setMarking(false); }
   }
-
-  if (error || !stock) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 text-gray-600">
-        <p>{error || 'Stock not found'}</p>
-        <Link to="/" className="text-gray-900 font-medium underline">Back to watchlist</Link>
-      </div>
-    );
-  }
-
-  const latest = history[history.length - 1];
-  const currentPrice = attention?.current_price ?? (latest ? Number(latest.close) : 0);
-  const level = attention?.attention_level ?? 'LOW';
-
-  const levelPill =
-    level === 'HIGH' ? 'bg-gray-900 text-white' :
-    level === 'MEDIUM' ? 'border border-gray-400 text-gray-700' :
-    'text-gray-400';
-
-  return (
-    <div className="min-h-screen bg-slate-50 font-sans pb-20">
-      <header className="bg-white border-b border-slate-200 px-4 sm:px-8 py-4 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-3xl mx-auto flex flex-wrap gap-3 items-center justify-between">
-          <Link to="/" className="flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors">
-            <ArrowLeft size={16} />
-            Back to watchlist
-          </Link>
-          {attention && (
-            <span className={`px-2.5 py-1 rounded text-[11px] font-bold tracking-wider ${levelPill}`}>
-              {level}
-            </span>
-          )}
-        </div>
-      </header>
-
-      <main className="max-w-3xl mx-auto px-4 sm:px-8 py-10 space-y-12">
-        {/* FACT SECTION */}
-        <section className="bg-white rounded-xl border border-slate-200 p-4 sm:p-8 shadow-sm">
-          <div className="mb-6">
-            <h1 className="text-3xl font-bold text-slate-900 leading-tight">{stock.symbol}</h1>
-            <p className="text-sm text-slate-500 mt-1">{stock.company_name}</p>
-          </div>
-
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-8 mb-8">
-            <div>
-              <p className="text-3xl sm:text-4xl break-words font-bold text-slate-900 leading-none">₹{currentPrice.toFixed(2)}</p>
-              {attention && (
-                <div className="flex flex-wrap items-center gap-2 mt-3">
-                  <span className={`text-lg font-semibold ${attention.session_change_pct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {attention.session_change_pct >= 0 ? '+' : ''}{attention.session_change_pct.toFixed(2)}%
-                  </span>
-                  <span className="text-sm text-slate-500">Today · vs previous close</span>
-                </div>
-              )}
-            </div>
-
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 sm:p-5 min-w-0">
-              <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Since you checked</p>
-              {attention?.since_last_view_pct != null ? (
-                <>
-                  <p className={`text-2xl font-bold ${attention.since_last_view_pct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {attention.since_last_view_pct >= 0 ? '+' : ''}{attention.since_last_view_pct.toFixed(2)}%
-                  </p>
-                  <p className="text-xs text-slate-400 mt-1">vs your last view</p>
-                </>
-              ) : (
-                <p className="text-lg font-medium text-slate-400 mt-1">No baseline yet</p>
-              )}
-            </div>
-          </div>
-
-          {history.length >= 2 && (
-            <div className="mt-4">
-              <PriceChart data={history} />
-            </div>
-          )}
-        </section>
-
-        {/* INTERPRETATION SECTION */}
-        {attention && attention.reasons.length > 0 && (
-          <section className="bg-white rounded-xl border border-slate-200 p-4 sm:p-8 shadow-sm">
-            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest mb-6">Why this matters</h2>
-            <ul className="space-y-4">
-              {attention.reasons.map((reason, idx) => (
-                <li key={idx} className="flex gap-4 items-start">
-                  <span className="text-slate-400 mt-0.5">•</span>
-                  <p className="text-slate-700 leading-relaxed text-base">{reason.message}</p>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        {/* PERSONALIZATION SECTION */}
-        {attention && (
-          <section className="bg-white rounded-xl border border-slate-200 p-4 sm:p-8 shadow-sm">
-            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest mb-6">Attention Score</h2>
-
-            <AttentionScore objective={attention.objective_score} preference={attention.preference_fit} final={attention.attention_score} level={attention.attention_level} />
-
-            <p className="text-sm text-slate-500 italic mt-6 bg-slate-50 p-4 rounded-lg border border-slate-100">
-              Personal relevance reflects movement since your last view and your preferences. Market facts remain the same for everyone.
-            </p>
-          </section>
-        )}
-
-        {/* DATA SOURCE & ACTIONS */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4">
-          <div className="text-xs font-medium text-slate-400">
-            {attention ? (
-              <DataFreshness freshness={attention.freshness} />
-            ) : (
-              <span>Not on your watchlist</span>
-            )}
-          </div>
-          <button
-            onClick={handleMarkViewed}
-            disabled={marking || justViewed}
-            className="w-full sm:w-auto px-6 py-3 bg-slate-900 text-white text-sm font-semibold rounded-lg hover:bg-slate-800 disabled:opacity-50 transition-colors shadow-sm"
-          >
-            {marking ? 'Marking...' : justViewed ? '✓ Caught up' : 'Mark as caught up'}
-          </button>
-        </div>
-        {markError && <p role="alert" className="text-sm text-red-700">{markError}</p>}
-      </main>
+  if (error) return <main className="analysis-page"><p role="alert">{error}</p><Link to="/">Back to attention</Link></main>;
+  if (!data) return <main className="analysis-page" role="status">Loading analysis…</main>;
+  const { identity, observation, temporal, volatility, volume, technical, attention, personal, final } = data;
+  return <main className="analysis-page">
+    <Link className="text-link" to="/">← Attention landscape</Link>
+    <header className="analysis-heading"><div><p className="eyebrow">Analysis / {identity.exchange} · {identity.sector ?? 'Sector unavailable'}</p><h1>{identity.symbol}</h1><p>{identity.company_name}</p></div><TemporalLens value={lens} onChange={setLens}/></header>
+    <div className="analysis-lead"><div><strong className="analysis-price">{observation.current_price === null ? 'Price unavailable' : `₹${observation.current_price.toFixed(2)}`}</strong><p><MarketDelta value={lens === 'today' ? temporal.session_change_pct : temporal.since_last_view_pct}/> · {lens === 'today' ? 'Today · vs previous close' : 'Since I looked · vs your last view'}</p></div>
+      {final ? <div className="attention-total"><span className="eyebrow">Attention</span><strong>{final.attention_score}</strong><span>{final.attention_level}</span></div> : <p>Analytics unavailable</p>}
     </div>
-  );
+    <DataFreshness freshness={observation.freshness}/><p className="caption">Market {observation.freshness.market_status?.toLowerCase()}</p>
+    {!data.availability.analytics_available && <p className="availability-notice">Analytics unavailable: {data.availability.reason}</p>}
+    <TemporalTimeline data={data} lens={lens}/>
+    <AnalysisChart data={data} lens={lens}/>
+    <section className="signal-map" aria-label="Signal map">{[
+      ['Move', volatility ? `${volatility.unusualness_ratio.toFixed(2)}× normal` : 'Unavailable', 'Magnitude vs daily volatility'],
+      ['Volume', volume.volume_ratio === null ? 'Unavailable' : `${volume.volume_ratio.toFixed(2)}× baseline`, `${volume.baseline_sample_count} prior sessions`],
+      ['Trend', technical ? technical.is_new_high ? 'New closing high' : 'Within prior range' : 'Unavailable', technical ? `Previous ${technical.sample_count} sessions` : 'No historical baseline'],
+      ['Since view', temporal.since_last_view_pct === null ? 'No baseline yet' : `${temporal.since_last_view_pct.toFixed(2)}%`, 'Vs your last saved price'],
+    ].map(([label, value, hint]) => <div key={label}><p className="eyebrow">{label}</p><strong>{value}</strong><p className="caption">{hint}</p></div>)}</section>
+    <section className="analysis-explanation"><div><h2>Why now?</h2><ReasonsList reasons={data.reasons} maxReasons={data.reasons.length}/></div><div>{attention && personal && final && <AttentionScore objective={attention.objective_score} preference={personal.preference_fit} final={final.attention_score} level={final.attention_level}/>}</div></section>
+    <ShowMath data={data}/>
+    <RelatedContext symbol={identity.symbol}/>
+    <footer className="analysis-actions"><p className="muted">Your baseline changes only when you explicitly mark this stock as caught up.</p><button className="primary-action" disabled={marking || justViewed || observation.current_price === null} onClick={markViewed}>{marking ? 'Marking…' : justViewed ? 'Caught up' : 'Mark as caught up'}</button></footer>
+    {markError && <p role="alert">{markError}</p>}
+  </main>;
 }

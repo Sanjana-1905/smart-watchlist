@@ -1,10 +1,12 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import AppShell from './components/AppShell';
 import ProtectedRoute from './components/ProtectedRoute';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import OnboardingPage from './pages/OnboardingPage';
 import DashboardPage from './pages/DashboardPage';
+import ExplorePage from './pages/ExplorePage';
 import StockDetail from './pages/StockDetail';
 
 function App() {
@@ -26,15 +28,16 @@ function App() {
             path="/"
             element={
               <ProtectedRoute>
-                <DashboardPage />
+                <AppShell><DashboardPage /></AppShell>
               </ProtectedRoute>
             }
           />
+          <Route path="/explore" element={<ProtectedRoute><AppShell><ExplorePage /></AppShell></ProtectedRoute>} />
           <Route
             path="/stock/:symbol"
             element={
               <ProtectedRoute>
-                <StockDetail />
+                <AppShell><StockDetail /></AppShell>
               </ProtectedRoute>
             }
           />

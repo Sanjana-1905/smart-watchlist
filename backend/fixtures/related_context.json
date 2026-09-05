@@ -1,0 +1,9 @@
+{
+  "verified_at": "2026-09-05",
+  "provenance": "Curated fixture of public company releases; not a live news feed.",
+  "items": {
+    "RELIANCE": [{"headline": "RIL Q1 FY2026-27 Financial and Operational Performance", "source": "Reliance Industries", "published_date": "2026-07-17", "url": "https://rilstaticasset.akamaized.net/sites/default/files/2026-07/Media_Release_RIL_Q1_FY2026-27_Financial_and_Operational_Performance.pdf"}],
+    "TCS": [{"headline": "TCS begins FY27 with continued growth; wins multiple AI transformation deals", "source": "Tata Consultancy Services", "published_date": "2026-07-09", "url": "https://www.tcs.com/who-we-are/newsroom/press-release/tcs-financial-results-q1-fy-2027"}],
+    "BEL": [{"headline": "BEL receives orders worth Rs.847 Crore", "source": "Bharat Electronics", "published_date": "2026-07-31", "url": "https://bel-india.in/news-bel/bel-receives-orders-worth-rs-847-crore/"}]
+  }
+}
