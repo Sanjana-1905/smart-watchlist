@@ -22,11 +22,17 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://localhost:3000",
+
+        # Stable Vercel production domain
         "https://smart-watchlist-eight.vercel.app",
+
+        # Submitted deployment domain
+        "https://smart-watchlist-72mdmq0h0-s-4288.vercel.app",
     ],
-    allow_origin_regex=r"https://.*\.vercel\.app",
+    # Also permits future Vercel preview/deployment URLs
+    allow_origin_regex=r"^https://smart-watchlist-[a-zA-Z0-9-]+\.vercel\.app$",
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
