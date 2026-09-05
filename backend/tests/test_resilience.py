@@ -3,6 +3,10 @@ Phase 10 resilience tests: error envelope shape, duplicate-add rejection,
 idempotent retries, optimistic-concurrency conflicts, health check honesty,
 and circuit-breaker behavior.
 
+Every protected endpoint (/watchlist/*, /profile) now requires a bearer
+token since the JWT auth migration, so these tests authenticate as the
+seeded demo user via the session-scoped `auth_headers` fixture.
+
 Run inside the backend container so 'db'/'redis' hostnames resolve:
     docker compose exec backend pytest tests/test_resilience.py -v
 """
@@ -11,6 +15,7 @@ import uuid
 
 class TestErrorEnvelope:
     def test_404_uses_flat_error_envelope(self, client):
+        # /stocks/{symbol} is public — no auth required.
         res = client.get("/stocks/NOTAREALSYMBOL")
         assert res.status_code == 404
         body = res.json()
@@ -18,26 +23,44 @@ class TestErrorEnvelope:
         assert "detail" not in body
         assert body["error"]["code"] == "STOCK_NOT_FOUND"
 
-    def test_watchlist_item_not_found_envelope(self, client, unwatchlisted_symbol):
-        res = client.delete(f"/watchlist/items/{unwatchlisted_symbol}")
+    def test_watchlist_item_not_found_envelope(self, client, auth_headers, unwatchlisted_symbol):
+        res = client.delete(f"/watchlist/items/{unwatchlisted_symbol}", headers=auth_headers)
         assert res.status_code == 404
         assert res.json()["error"]["code"] == "WATCHLIST_ITEM_NOT_FOUND"
 
 
+class TestAuthRequired:
+    """New: protected routes must reject requests with no/invalid token."""
+
+    def test_missing_token_returns_401(self, client):
+        res = client.get("/watchlist")
+        assert res.status_code == 401
+        assert res.json()["error"]["code"] == "MISSING_TOKEN"
+
+    def test_invalid_token_returns_401(self, client):
+        res = client.get("/watchlist", headers={"Authorization": "Bearer not-a-real-token"})
+        assert res.status_code == 401
+        assert res.json()["error"]["code"] == "INVALID_TOKEN"
+
+    def test_valid_token_succeeds(self, client, auth_headers):
+        res = client.get("/watchlist", headers=auth_headers)
+        assert res.status_code == 200
+
+
 class TestDuplicateWatchlist:
-    def test_duplicate_add_rejected_with_409(self, client, unwatchlisted_symbol):
-        first = client.post("/watchlist/items", json={"symbol": unwatchlisted_symbol})
+    def test_duplicate_add_rejected_with_409(self, client, auth_headers, unwatchlisted_symbol):
+        first = client.post("/watchlist/items", json={"symbol": unwatchlisted_symbol}, headers=auth_headers)
         assert first.status_code == 201
 
-        second = client.post("/watchlist/items", json={"symbol": unwatchlisted_symbol})
+        second = client.post("/watchlist/items", json={"symbol": unwatchlisted_symbol}, headers=auth_headers)
         assert second.status_code == 409
         assert second.json()["error"]["code"] == "WATCHLIST_DUPLICATE"
 
 
 class TestIdempotency:
-    def test_same_key_returns_identical_result_not_a_duplicate_error(self, client, unwatchlisted_symbol):
+    def test_same_key_returns_identical_result_not_a_duplicate_error(self, client, auth_headers, unwatchlisted_symbol):
         key = str(uuid.uuid4())
-        headers = {"Idempotency-Key": key}
+        headers = {**auth_headers, "Idempotency-Key": key}
 
         first = client.post("/watchlist/items", json={"symbol": unwatchlisted_symbol}, headers=headers)
         assert first.status_code == 201
@@ -47,24 +70,24 @@ class TestIdempotency:
         assert second.json() == first.json(), \
             "Retrying with the same Idempotency-Key must replay the original result"
 
-    def test_different_key_hits_real_business_rules(self, client, unwatchlisted_symbol):
+    def test_different_key_hits_real_business_rules(self, client, auth_headers, unwatchlisted_symbol):
         first = client.post(
             "/watchlist/items", json={"symbol": unwatchlisted_symbol},
-            headers={"Idempotency-Key": str(uuid.uuid4())},
+            headers={**auth_headers, "Idempotency-Key": str(uuid.uuid4())},
         )
         assert first.status_code == 201
 
         second = client.post(
             "/watchlist/items", json={"symbol": unwatchlisted_symbol},
-            headers={"Idempotency-Key": str(uuid.uuid4())},
+            headers={**auth_headers, "Idempotency-Key": str(uuid.uuid4())},
         )
         assert second.status_code == 409, \
             "A different idempotency key must not bypass the real duplicate check"
 
 
 class TestProfileConcurrency:
-    def test_wrong_version_returns_409(self, client):
-        current = client.get("/profile").json()
+    def test_wrong_version_returns_409(self, client, auth_headers):
+        current = client.get("/profile", headers=auth_headers).json()
         wrong_version = current["version"] + 999
 
         res = client.put(
@@ -74,13 +97,13 @@ class TestProfileConcurrency:
                 "attention_style": current["attention_style"],
                 "time_horizon": current["time_horizon"],
             },
-            headers={"If-Match": str(wrong_version)},
+            headers={**auth_headers, "If-Match": str(wrong_version)},
         )
         assert res.status_code == 409
         assert res.json()["error"]["code"] == "VERSION_CONFLICT"
 
-    def test_correct_version_succeeds_and_increments(self, client):
-        current = client.get("/profile").json()
+    def test_correct_version_succeeds_and_increments(self, client, auth_headers):
+        current = client.get("/profile", headers=auth_headers).json()
         res = client.put(
             "/profile",
             json={
@@ -88,7 +111,7 @@ class TestProfileConcurrency:
                 "attention_style": current["attention_style"],
                 "time_horizon": current["time_horizon"],
             },
-            headers={"If-Match": str(current["version"])},
+            headers={**auth_headers, "If-Match": str(current["version"])},
         )
         assert res.status_code == 200
         assert res.json()["version"] == current["version"] + 1
@@ -96,6 +119,7 @@ class TestProfileConcurrency:
 
 class TestHealthCheck:
     def test_health_returns_healthy_when_dependencies_ok(self, client):
+        # /health is intentionally public — infra probes shouldn't need a token.
         res = client.get("/health")
         assert res.status_code == 200
         body = res.json()
@@ -105,8 +129,8 @@ class TestHealthCheck:
 
 
 class TestValidationErrorEnvelope:
-    def test_missing_required_field_uses_error_envelope(self, client):
-        res = client.post("/watchlist/items", json={})
+    def test_missing_required_field_uses_error_envelope(self, client, auth_headers):
+        res = client.post("/watchlist/items", json={}, headers=auth_headers)
         assert res.status_code == 422
         body = res.json()
         assert "error" in body

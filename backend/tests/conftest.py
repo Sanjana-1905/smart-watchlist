@@ -5,8 +5,11 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.core.database import SessionLocal
 from app.core.config import settings
-from app.core.current_user import DEMO_USER_ID
 from app.models import Stock, WatchlistItem
+
+# DEMO_USER_ID now lives in seed.py, not app.core.current_user — the JWT
+# migration removed the old hardcoded-user constant from current_user.py.
+from seed import DEMO_USER_ID, DEMO_EMAIL, DEMO_PASSWORD
 
 
 @pytest.fixture(scope="session")
@@ -22,6 +25,19 @@ def redis_client():
     r = redis_lib.from_url(settings.redis_url, decode_responses=True)
     yield r
     r.close()
+
+
+@pytest.fixture(scope="session")
+def auth_headers(client):
+    """
+    Logs in as the seeded demo user once per test session and returns the
+    Authorization header every protected-endpoint test needs. All watchlist/
+    profile routes require a bearer token since the JWT auth migration.
+    """
+    res = client.post("/auth/login", json={"email": DEMO_EMAIL, "password": DEMO_PASSWORD})
+    assert res.status_code == 200, f"Demo login must succeed for tests to run: {res.text}"
+    token = res.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture()
