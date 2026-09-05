@@ -131,8 +131,10 @@ class TestObjectiveScoring:
         relevance, reasons = calculate_personal_relevance(
             features, UserPreferences("BALANCED", "BALANCED", "LONG_TERM")
         )
-        assert relevance == 20
-        assert [r.type for r in reasons] == ["SINCE_VIEW"]
+        # 20 since-view points + 5 long-term horizon relevance
+        assert relevance == 25
+        assert [r.type for r in reasons] == ["SINCE_VIEW", "PREFERENCE"]
+        assert reasons[1].value == "LONG_TERM"
 
     def test_since_view_no_reason_when_small(self):
         """Small change (< 1%) contributes points but no reason."""

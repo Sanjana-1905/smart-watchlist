@@ -56,7 +56,17 @@ def test_objective_ignores_all_since_view_states(since_view):
     assert score == baseline_score
     assert reasons == baseline_reasons
     result = calculate_attention(features, UserPreferences("BALANCED", "BALANCED", "LONG_TERM"))
-    assert result.preference_fit == pytest.approx(round(min(abs(since_view or 0) / .05, 1) * 20, 1))
+    since_view_points = min(abs(since_view or 0) / .05, 1) * 20
+    long_term_profile_points = min(abs(since_view or 0) / .05, 1) * 5
+
+    expected_personal_relevance = round(
+        since_view_points + long_term_profile_points,
+        1,
+    )
+
+    assert result.preference_fit == pytest.approx(
+        expected_personal_relevance
+    )
     assert any(r.type == "SINCE_VIEW" for r in result.reasons) == (abs(since_view or 0) >= .01)
 
 
@@ -91,7 +101,7 @@ def test_different_users_baselines_and_profiles_share_objective(client, isolated
     assert b["since_last_view_pct"] == 1.96
     assert a["objective_score"] == b["objective_score"]
     assert a["preference_fit"] == 31
-    assert b["preference_fit"] == 7.8
+    assert b["preference_fit"] == 9.8
     assert a["attention_score"] != b["attention_score"]
     for user in users:
         features = extract_features(db, stock.id, user.id)
