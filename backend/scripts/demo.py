@@ -1,33 +1,49 @@
 """
-Deterministic demo control script.
+Deterministic Smart Watchlist demo controller.
 
 Usage:
-    python scripts/demo.py reset
-    python scripts/demo.py advance
+    docker compose exec backend python scripts/demo.py reset
+    docker compose exec backend python scripts/demo.py advance
 
-Design goal:
-An evaluator running `reset` then `advance` must see the exact same
-meaningful-change moment every time.
+Timeline:
+
+    Previous trading-session close
+              |
+              | small market move
+              v
+    Intermediate observation
+       USER LAST CHECKED HERE
+              |
+              | later market movement
+              v
+    Final observation
+
+Therefore:
+
+    TODAY
+        = final price vs previous trading-session close
+
+    SINCE CHECKED
+        = final price vs intermediate last-view price
+
+The two values are intentionally different.
 
 IMPORTANT:
-- Market/session semantics use Asia/Kolkata (IST).
-- PostgreSQL timestamps are stored in UTC.
-- DEMO_MODE should be enabled so the background poller does not overwrite
-  the deterministic scenario.
+    Run with DEMO_MODE=true so the APScheduler market poller does not
+    overwrite the deterministic scenario.
 """
 
 import sys
 import uuid
+from collections import defaultdict
+from datetime import datetime, timezone, time, timedelta
 from pathlib import Path
-from datetime import datetime, timezone, time
 from zoneinfo import ZoneInfo
 
 # ---------------------------------------------------------------------------
 # IMPORT PATH
 # ---------------------------------------------------------------------------
 
-# backend/scripts/demo.py lives beside backend/app/
-#
 # Host:
 #   <repo>/backend/scripts/demo.py
 #   <repo>/backend/app/
@@ -36,34 +52,34 @@ from zoneinfo import ZoneInfo
 #   /app/scripts/demo.py
 #   /app/app/
 #
-# Therefore the backend root is always one directory above this file.
+# In both environments, backend root = parent of scripts/.
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_ROOT))
 
-from sqlalchemy import select, delete
+from sqlalchemy import delete, select
 
 from app.core.database import SessionLocal
 from app.core.security import hash_password
 from app.models import (
-    Stock,
     PriceSnapshot,
-    UserViewState,
-    WatchlistItem,
+    Stock,
     User,
     UserProfile,
+    UserViewState,
+    WatchlistItem,
 )
 
 
-# ---------------------------------------------------------------------------
-# TIMEZONE
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# GENERAL CONFIG
+# ===========================================================================
 
 IST = ZoneInfo("Asia/Kolkata")
 
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
 # DEMO USERS
-# ---------------------------------------------------------------------------
+# ===========================================================================
 
 PRIMARY_DEMO_USER_ID = "00000000-0000-0000-0000-000000000001"
 STABILITY_DEMO_USER_ID = "00000000-0000-0000-0000-000000000002"
@@ -73,295 +89,121 @@ DEMO_USER_IDS = [
     STABILITY_DEMO_USER_ID,
 ]
 
+PRIMARY_DEMO_EMAIL = "demo@smartwatchlist.dev"
+
 STABILITY_DEMO_EMAIL = "demo.stability@smartwatchlist.dev"
 STABILITY_DEMO_PASSWORD = "demo1234"
 STABILITY_DEMO_DISPLAY_NAME = "Stability Sam"
 
 
-# ---------------------------------------------------------------------------
-# DEMO SCENARIO
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# DEMO MARKET SCENARIO
+# ===========================================================================
 
-# These moves are applied relative to the clean historical baseline that
-# remains after `reset`.
+# Stage 1:
+# Small movement from previous session close to the point where the user
+# last checked the watchlist.
 #
-# The scenario intentionally contains:
-#
-# RELIANCE  -> very strong positive event
-# BEL       -> strong positive event
-# HDFCBANK  -> meaningful negative event
-# TCS       -> ordinary positive movement
-# TATASTEEL -> ordinary negative movement
-#
-# This allows the two profiles to react differently WITHOUT changing the
-# underlying market facts.
+# These are deliberately mild.
+SCENARIO_INTERMEDIATE = {
+    "RELIANCE": 0.015,     # +1.50%
+    "BEL": 0.008,          # +0.80%
+    "HDFCBANK": -0.010,    # -1.00%
+    "TCS": 0.002,          # +0.20%
+    "TATASTEEL": -0.003,   # -0.30%
+}
 
-SCENARIO = {
+
+# Stage 2:
+# Additional movement AFTER the user checked.
+#
+# pct_move here is relative to the intermediate/check price.
+SCENARIO_FINAL = {
     "RELIANCE": {
-        "pct_move": 0.062,
+        "pct_move": 0.047,         # +4.70% since checked
         "volume_multiplier": 3.1,
-        "new_high": True,
     },
     "BEL": {
-        "pct_move": 0.041,
+        "pct_move": 0.033,         # +3.30% since checked
         "volume_multiplier": 2.3,
-        "new_high": True,
     },
     "HDFCBANK": {
-        "pct_move": -0.038,
+        "pct_move": -0.028,        # -2.80% since checked
         "volume_multiplier": 1.9,
-        "new_high": False,
     },
     "TCS": {
-        "pct_move": 0.004,
+        "pct_move": 0.002,         # +0.20% since checked
         "volume_multiplier": 1.05,
-        "new_high": False,
     },
     "TATASTEEL": {
-        "pct_move": -0.006,
+        "pct_move": -0.003,        # -0.30% since checked
         "volume_multiplier": 0.95,
-        "new_high": False,
     },
 }
 
 
-# ---------------------------------------------------------------------------
-# TIME HELPERS
-# ---------------------------------------------------------------------------
+# The feature engine calculates current-session volume as the SUM of all
+# snapshots in the session.
+#
+# Give 20% of the target day's volume to the intermediate observation and
+# the remaining 80% to the final observation.
+INTERMEDIATE_VOLUME_FRACTION = 0.20
 
-def get_today_ist_start_utc():
+
+# ===========================================================================
+# TIME HELPERS
+# ===========================================================================
+
+def get_today_ist_start_utc() -> datetime:
     """
-    Return the UTC timestamp corresponding to midnight today in India.
+    Return the UTC timestamp corresponding to today's midnight in IST.
 
     Example:
-
         2026-09-05 00:00 IST
         =
         2026-09-04 18:30 UTC
 
-    Why this exists:
-
-    PostgreSQL stores timestamps in UTC, but Indian market sessions are
-    determined using Indian local dates.
-
-    Using UTC midnight here would incorrectly leave snapshots such as
-    2026-09-04 23:59 UTC in the database even though that timestamp is
-    already 2026-09-05 in India.
+    PostgreSQL timestamps are stored in UTC, but market sessions are grouped
+    using Indian calendar dates.
     """
 
     now_ist = datetime.now(IST)
 
-    start_of_today_ist = datetime.combine(
+    start_ist = datetime.combine(
         now_ist.date(),
         time.min,
         tzinfo=IST,
     )
 
-    return start_of_today_ist.astimezone(timezone.utc)
+    return start_ist.astimezone(timezone.utc)
 
 
-# ---------------------------------------------------------------------------
-# DEMO PROFILE HELPERS
-# ---------------------------------------------------------------------------
-
-def ensure_momentum_demo_profile(db):
+def get_intermediate_timestamp() -> datetime:
     """
-    Force the primary demo user's profile to:
+    Return a deterministic-safe timestamp representing when the user
+    last checked.
 
-        AGGRESSIVE
-        MOMENTUM
-        SHORT_TERM
+    Normally this is 10 minutes ago.
 
-    This is done every reset because manual profile/onboarding testing may
-    modify the demo account.
-
-    reset() is therefore the single source of truth for the deterministic
-    Momentum demo identity.
+    Unlike a hard-coded "10:30 AM today", this can never accidentally point
+    into the future when the demo is run early in the morning.
     """
 
-    uid = uuid.UUID(PRIMARY_DEMO_USER_ID)
+    now_utc = datetime.now(timezone.utc)
+    today_start_utc = get_today_ist_start_utc()
 
-    profile = db.get(UserProfile, uid)
+    candidate = now_utc - timedelta(minutes=10)
+    earliest_today = today_start_utc + timedelta(minutes=1)
 
-    if profile is None:
-        profile = UserProfile(
-            user_id=uid,
-            risk_profile="AGGRESSIVE",
-            attention_style="MOMENTUM",
-            time_horizon="SHORT_TERM",
-            version=1,
-            onboarding_completed=True,
-        )
-
-        db.add(profile)
-
-        print(
-            "  Created primary demo profile: "
-            "AGGRESSIVE/MOMENTUM/SHORT_TERM."
-        )
-
-    else:
-        profile.risk_profile = "AGGRESSIVE"
-        profile.attention_style = "MOMENTUM"
-        profile.time_horizon = "SHORT_TERM"
-        profile.onboarding_completed = True
-        profile.version += 1
-
-        print(
-            "  Reset primary demo user's profile to "
-            "AGGRESSIVE/MOMENTUM/SHORT_TERM."
-        )
-
-    db.commit()
+    return max(candidate, earliest_today)
 
 
-def ensure_stability_demo_user(db):
-    """
-    Create or restore the second demo identity.
-
-    Stability Sam sees the SAME:
-        - stocks
-        - prices
-        - volume
-        - market observations
-
-    as the primary demo user.
-
-    Only the preference profile differs.
-
-    This allows us to prove:
-
-        same market facts
-            ->
-        same objective score
-            ->
-        different preference fit
-            ->
-        potentially different final attention
-    """
-
-    uid = uuid.UUID(STABILITY_DEMO_USER_ID)
-    primary_uid = uuid.UUID(PRIMARY_DEMO_USER_ID)
-
-    # ------------------------------------------------------------------
-    # USER
-    # ------------------------------------------------------------------
-
-    user = db.get(User, uid)
-
-    if user is None:
-        user = User(
-            id=uid,
-            email=STABILITY_DEMO_EMAIL,
-            password_hash=hash_password(STABILITY_DEMO_PASSWORD),
-            display_name=STABILITY_DEMO_DISPLAY_NAME,
-        )
-
-        db.add(user)
-        db.commit()
-
-        print(f"  Created user {STABILITY_DEMO_EMAIL}.")
-
-    else:
-        print(f"  User {STABILITY_DEMO_EMAIL} already exists.")
-
-    # ------------------------------------------------------------------
-    # PROFILE
-    # ------------------------------------------------------------------
-
-    profile = db.get(UserProfile, uid)
-
-    if profile is None:
-        profile = UserProfile(
-            user_id=uid,
-            risk_profile="CONSERVATIVE",
-            attention_style="STABILITY",
-            time_horizon="LONG_TERM",
-            version=1,
-            onboarding_completed=True,
-        )
-
-        db.add(profile)
-
-        print(
-            f"  Created profile for {STABILITY_DEMO_EMAIL}: "
-            "CONSERVATIVE/STABILITY/LONG_TERM."
-        )
-
-    else:
-        profile.risk_profile = "CONSERVATIVE"
-        profile.attention_style = "STABILITY"
-        profile.time_horizon = "LONG_TERM"
-        profile.onboarding_completed = True
-        profile.version += 1
-
-        print(
-            f"  Reset profile for {STABILITY_DEMO_EMAIL} to "
-            "CONSERVATIVE/STABILITY/LONG_TERM."
-        )
-
-    db.commit()
-
-    # ------------------------------------------------------------------
-    # COPY PRIMARY WATCHLIST
-    # ------------------------------------------------------------------
-
-    primary_rows = db.execute(
-        select(WatchlistItem).where(
-            WatchlistItem.user_id == primary_uid
-        )
-    ).scalars().all()
-
-    primary_stock_ids = {
-        item.stock_id
-        for item in primary_rows
-    }
-
-    existing_rows = db.execute(
-        select(WatchlistItem).where(
-            WatchlistItem.user_id == uid
-        )
-    ).scalars().all()
-
-    existing_stock_ids = {
-        item.stock_id
-        for item in existing_rows
-    }
-
-    now = datetime.now(timezone.utc)
-
-    added = 0
-
-    for stock_id in primary_stock_ids - existing_stock_ids:
-        db.add(
-            WatchlistItem(
-                id=uuid.uuid4(),
-                user_id=uid,
-                stock_id=stock_id,
-                added_at=now,
-                version=1,
-            )
-        )
-
-        added += 1
-
-    db.commit()
-
-    print(
-        f"  Watchlist synced: {added} stock(s) added "
-        f"to match primary demo user "
-        f"(total {len(primary_stock_ids)})."
-    )
-
-
-# ---------------------------------------------------------------------------
-# MARKET DATA HELPERS
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# MARKET HELPERS
+# ===========================================================================
 
 def get_latest_snapshot(db, stock_id):
-    """
-    Return the newest stored market observation for a stock.
-    """
+    """Return the latest stored observation for a stock."""
 
     return db.scalar(
         select(PriceSnapshot)
@@ -374,168 +216,627 @@ def get_latest_snapshot(db, stock_id):
     )
 
 
-def get_avg_recent_volume(
-    db,
-    stock_id,
-    exclude_today=True,
-):
+def get_previous_session_close(db, stock_id):
     """
-    Calculate average recent historical volume.
+    Return the newest observation strictly before today's IST session.
 
-    When exclude_today=True, "today" means the current IST calendar day,
-    NOT the current UTC calendar day.
-
-    This keeps the demo's volume baseline aligned with Indian trading-session
-    semantics.
+    This is the baseline used for the TODAY percentage.
     """
 
-    snaps = db.scalars(
+    today_start_utc = get_today_ist_start_utc()
+
+    return db.scalar(
         select(PriceSnapshot)
         .where(
-            PriceSnapshot.stock_id == stock_id
+            PriceSnapshot.stock_id == stock_id,
+            PriceSnapshot.timestamp < today_start_utc,
         )
         .order_by(
             PriceSnapshot.timestamp.desc()
         )
-        .limit(50)
-    ).all()
-
-    if exclude_today:
-        today_start_utc = get_today_ist_start_utc()
-
-        snaps = [
-            snap
-            for snap in snaps
-            if snap.timestamp < today_start_utc
-        ]
-
-    if not snaps:
-        return 1_000_000.0
-
-    return (
-        sum(float(snapshot.volume) for snapshot in snaps)
-        / len(snaps)
     )
 
 
-# ---------------------------------------------------------------------------
+def get_historical_snapshots_before_today(db, stock_id):
+    """
+    Return all observations prior to today's IST session.
+    """
+
+    today_start_utc = get_today_ist_start_utc()
+
+    return db.scalars(
+        select(PriceSnapshot)
+        .where(
+            PriceSnapshot.stock_id == stock_id,
+            PriceSnapshot.timestamp < today_start_utc,
+        )
+        .order_by(
+            PriceSnapshot.timestamp.asc()
+        )
+    ).all()
+
+
+def get_historical_session_volumes(db, stock_id):
+    """
+    Convert historical raw snapshots into daily IST trading-session volumes.
+
+    The production feature engine treats a session's volume as the SUM of
+    snapshot volumes in that session, so the demo must use the same model.
+    """
+
+    snapshots = get_historical_snapshots_before_today(
+        db,
+        stock_id,
+    )
+
+    grouped = defaultdict(float)
+
+    for snapshot in snapshots:
+        timestamp = snapshot.timestamp
+
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(
+                tzinfo=timezone.utc
+            )
+
+        session_date = timestamp.astimezone(
+            IST
+        ).date()
+
+        grouped[session_date] += float(
+            snapshot.volume
+        )
+
+    return [
+        grouped[session_date]
+        for session_date in sorted(grouped)
+    ]
+
+
+def get_avg_historical_session_volume(db, stock_id) -> float:
+    """
+    Return average volume from the most recent 20 historical IST sessions.
+    """
+
+    volumes = get_historical_session_volumes(
+        db,
+        stock_id,
+    )
+
+    if not volumes:
+        return 1_000_000.0
+
+    recent = volumes[-20:]
+
+    return sum(recent) / len(recent)
+
+
+# ===========================================================================
+# DEMO USER HELPERS
+# ===========================================================================
+
+def ensure_primary_demo_user_exists(db):
+    """
+    Ensure the primary seeded demo user exists.
+    """
+
+    uid = uuid.UUID(
+        PRIMARY_DEMO_USER_ID
+    )
+
+    user = db.get(
+        User,
+        uid,
+    )
+
+    if user is None:
+        raise RuntimeError(
+            "Primary demo user does not exist. "
+            "Run the normal application seed/bootstrap first."
+        )
+
+    if user.email != PRIMARY_DEMO_EMAIL:
+        print(
+            "  WARNING: primary demo UUID exists but email is "
+            f"{user.email!r}; expected {PRIMARY_DEMO_EMAIL!r}"
+        )
+
+
+def ensure_momentum_demo_profile(db):
+    """
+    Force the primary demo profile to:
+
+        AGGRESSIVE
+        MOMENTUM
+        SHORT_TERM
+    """
+
+    uid = uuid.UUID(
+        PRIMARY_DEMO_USER_ID
+    )
+
+    profile = db.get(
+        UserProfile,
+        uid,
+    )
+
+    if profile is None:
+
+        profile = UserProfile(
+            user_id=uid,
+            risk_profile="AGGRESSIVE",
+            attention_style="MOMENTUM",
+            time_horizon="SHORT_TERM",
+            version=1,
+            onboarding_completed=True,
+        )
+
+        db.add(profile)
+
+        print(
+            "  Created primary profile: "
+            "AGGRESSIVE / MOMENTUM / SHORT_TERM"
+        )
+
+    else:
+
+        profile.risk_profile = "AGGRESSIVE"
+        profile.attention_style = "MOMENTUM"
+        profile.time_horizon = "SHORT_TERM"
+        profile.onboarding_completed = True
+        profile.version += 1
+
+        print(
+            "  Reset primary profile: "
+            "AGGRESSIVE / MOMENTUM / SHORT_TERM"
+        )
+
+    db.commit()
+
+
+def ensure_stability_demo_user(db):
+    """
+    Create/reset Stability Sam.
+
+    Stability Sam has the exact same watchlist and market observations as
+    the primary user, but:
+
+        CONSERVATIVE
+        STABILITY
+        LONG_TERM
+    """
+
+    uid = uuid.UUID(
+        STABILITY_DEMO_USER_ID
+    )
+
+    primary_uid = uuid.UUID(
+        PRIMARY_DEMO_USER_ID
+    )
+
+    # ----------------------------------------------------------------------
+    # USER
+    # ----------------------------------------------------------------------
+
+    user = db.get(
+        User,
+        uid,
+    )
+
+    if user is None:
+
+        user = User(
+            id=uid,
+            email=STABILITY_DEMO_EMAIL,
+            password_hash=hash_password(
+                STABILITY_DEMO_PASSWORD
+            ),
+            display_name=STABILITY_DEMO_DISPLAY_NAME,
+        )
+
+        db.add(user)
+        db.commit()
+
+        print(
+            f"  Created {STABILITY_DEMO_EMAIL}"
+        )
+
+    else:
+
+        # Keep the deterministic display identity self-healing.
+        user.email = STABILITY_DEMO_EMAIL
+        user.display_name = STABILITY_DEMO_DISPLAY_NAME
+
+        # Ensure the documented demo password works after any manual tests.
+        user.password_hash = hash_password(
+            STABILITY_DEMO_PASSWORD
+        )
+
+        db.commit()
+
+        print(
+            f"  Reset user {STABILITY_DEMO_EMAIL}"
+        )
+
+    # ----------------------------------------------------------------------
+    # PROFILE
+    # ----------------------------------------------------------------------
+
+    profile = db.get(
+        UserProfile,
+        uid,
+    )
+
+    if profile is None:
+
+        profile = UserProfile(
+            user_id=uid,
+            risk_profile="CONSERVATIVE",
+            attention_style="STABILITY",
+            time_horizon="LONG_TERM",
+            version=1,
+            onboarding_completed=True,
+        )
+
+        db.add(profile)
+
+        print(
+            "  Created Stability profile: "
+            "CONSERVATIVE / STABILITY / LONG_TERM"
+        )
+
+    else:
+
+        profile.risk_profile = "CONSERVATIVE"
+        profile.attention_style = "STABILITY"
+        profile.time_horizon = "LONG_TERM"
+        profile.onboarding_completed = True
+        profile.version += 1
+
+        print(
+            "  Reset Stability profile: "
+            "CONSERVATIVE / STABILITY / LONG_TERM"
+        )
+
+    db.commit()
+
+    # ----------------------------------------------------------------------
+    # EXACT WATCHLIST SYNCHRONIZATION
+    # ----------------------------------------------------------------------
+
+    primary_items = db.scalars(
+        select(WatchlistItem)
+        .where(
+            WatchlistItem.user_id == primary_uid
+        )
+    ).all()
+
+    primary_stock_ids = {
+        item.stock_id
+        for item in primary_items
+    }
+
+    stability_items = db.scalars(
+        select(WatchlistItem)
+        .where(
+            WatchlistItem.user_id == uid
+        )
+    ).all()
+
+    stability_stock_ids = {
+        item.stock_id
+        for item in stability_items
+    }
+
+    missing = (
+        primary_stock_ids
+        - stability_stock_ids
+    )
+
+    extras = (
+        stability_stock_ids
+        - primary_stock_ids
+    )
+
+    now = datetime.now(
+        timezone.utc
+    )
+
+    for stock_id in missing:
+
+        db.add(
+            WatchlistItem(
+                id=uuid.uuid4(),
+                user_id=uid,
+                stock_id=stock_id,
+                added_at=now,
+                version=1,
+            )
+        )
+
+    if extras:
+
+        db.execute(
+            delete(WatchlistItem)
+            .where(
+                WatchlistItem.user_id == uid,
+                WatchlistItem.stock_id.in_(
+                    extras
+                ),
+            )
+        )
+
+    db.commit()
+
+    print(
+        "  Stability watchlist synchronized: "
+        f"{len(primary_stock_ids)} stock(s) "
+        f"({len(missing)} added, {len(extras)} removed)"
+    )
+
+
+# ===========================================================================
 # RESET
-# ---------------------------------------------------------------------------
+# ===========================================================================
 
 def cmd_reset():
     """
-    Restore the complete deterministic demo baseline.
+    Reset the deterministic demo to the moment the users last checked.
 
-    Steps:
+    Result:
 
-    1. Remove current-IST-day MOCK snapshots.
-    2. Restore Stability Sam.
-    3. Restore primary Momentum profile.
-    4. Synchronize demo watchlists.
-    5. Clear old user view state.
-    6. Establish a new previous-view baseline from each stock's final
-       remaining historical observation.
+        previous session close
+                |
+                | mild movement
+                v
+        intermediate price
+                ^
+                |
+           USER VIEWED HERE
 
-    After this command:
-
-        current market state = historical baseline
-
-        last viewed price = historical baseline
-
-    Therefore after `advance`:
-
-        session change
-        AND
-        since-last-view change
-
-    are both measured from the same deterministic baseline.
+    The `advance` command later creates the final market state.
     """
 
     db = SessionLocal()
 
     try:
 
-        # ------------------------------------------------------------------
-        # STEP 1: DELETE CURRENT IST-DAY MOCK OBSERVATIONS
-        # ------------------------------------------------------------------
-
-        today_start_utc = get_today_ist_start_utc()
-
         print()
-        print("=== RESETTING DETERMINISTIC DEMO ===")
+        print("=" * 78)
+        print("RESETTING SMART WATCHLIST DETERMINISTIC DEMO")
+        print("=" * 78)
         print()
 
-        print(
-            "Cleaning mock snapshots from current IST day..."
+        today_start_utc = (
+            get_today_ist_start_utc()
         )
 
+        # ------------------------------------------------------------------
+        # STEP 1 — CLEAN CURRENT SESSION MOCK DATA
+        # ------------------------------------------------------------------
+
         print(
-            f"  IST-day UTC boundary: "
-            f"{today_start_utc.isoformat()}"
+            "1. Cleaning current IST-day mock observations..."
         )
 
         deleted = db.execute(
-            delete(PriceSnapshot).where(
+            delete(PriceSnapshot)
+            .where(
                 PriceSnapshot.source == "mock",
-                PriceSnapshot.timestamp >= today_start_utc,
+                PriceSnapshot.timestamp
+                >= today_start_utc,
             )
         )
 
         db.commit()
 
         print(
-            f"  Deleted {deleted.rowcount} "
-            "current-session mock snapshot(s)."
+            f"   Deleted {deleted.rowcount} snapshot(s)"
         )
 
         # ------------------------------------------------------------------
-        # STEP 2: RESTORE SECOND DEMO IDENTITY
+        # STEP 2 — RESTORE USERS
         # ------------------------------------------------------------------
 
         print()
         print(
-            "Ensuring second demo identity "
-            "(Stability Sam) exists..."
+            "2. Restoring deterministic demo identities..."
         )
 
-        ensure_stability_demo_user(db)
+        ensure_primary_demo_user_exists(
+            db
+        )
+
+        ensure_momentum_demo_profile(
+            db
+        )
+
+        ensure_stability_demo_user(
+            db
+        )
 
         # ------------------------------------------------------------------
-        # STEP 3: RESTORE PRIMARY PROFILE
+        # STEP 3 — CREATE INTERMEDIATE MARKET STATE
         # ------------------------------------------------------------------
 
         print()
         print(
-            "Resetting primary demo profile..."
+            "3. Creating intermediate market state "
+            "(the users' last-check point)..."
         )
 
-        ensure_momentum_demo_profile(db)
+        stocks = {
+            stock.symbol: stock
+            for stock in db.scalars(
+                select(Stock)
+            ).all()
+        }
 
-        # ------------------------------------------------------------------
-        # STEP 4: ESTABLISH VIEW BASELINES
-        # ------------------------------------------------------------------
+        intermediate_timestamp = (
+            get_intermediate_timestamp()
+        )
+
+        print(
+            "   Last-check timestamp: "
+            f"{intermediate_timestamp.astimezone(IST).isoformat()}"
+        )
+
+        intermediate_prices = {}
 
         print()
-        print("Establishing deterministic view-state baselines...")
+        print(
+            f"{'SYMBOL':<12}"
+            f"{'PREV CLOSE':>14}"
+            f"{'CHECKED':>14}"
+            f"{'TODAY@CHECK':>15}"
+        )
 
-        for uid_str in DEMO_USER_IDS:
+        print("-" * 55)
 
-            uid = uuid.UUID(uid_str)
+        for (
+            symbol,
+            pct_move,
+        ) in SCENARIO_INTERMEDIATE.items():
 
-            # Remove previous view-state rows.
-            #
-            # This prevents stale state from:
-            # - previous demos
-            # - removed stocks
-            # - previous detail-page visits
+            stock = stocks.get(
+                symbol
+            )
 
-            db.execute(
-                delete(UserViewState).where(
-                    UserViewState.user_id == uid
+            if stock is None:
+                print(
+                    f"WARNING: {symbol} not found; skipping"
+                )
+                continue
+
+            historical = (
+                get_previous_session_close(
+                    db,
+                    stock.id,
                 )
             )
 
-            db.commit()
+            if historical is None:
+                print(
+                    f"WARNING: {symbol} has no previous "
+                    "session close; skipping"
+                )
+                continue
+
+            previous_close = float(
+                historical.close
+            )
+
+            intermediate_price = round(
+                previous_close
+                * (
+                    1
+                    + pct_move
+                ),
+                2,
+            )
+
+            # --------------------------------------------------------------
+            # SESSION VOLUME
+            # --------------------------------------------------------------
+
+            avg_volume = (
+                get_avg_historical_session_volume(
+                    db,
+                    stock.id,
+                )
+            )
+
+            final_multiplier = (
+                SCENARIO_FINAL[
+                    symbol
+                ][
+                    "volume_multiplier"
+                ]
+            )
+
+            desired_total_volume = int(
+                avg_volume
+                * final_multiplier
+            )
+
+            intermediate_volume = max(
+                int(
+                    desired_total_volume
+                    * INTERMEDIATE_VOLUME_FRACTION
+                ),
+                1,
+            )
+
+            snapshot = PriceSnapshot(
+                id=uuid.uuid4(),
+                stock_id=stock.id,
+                timestamp=intermediate_timestamp,
+                open=previous_close,
+                high=(
+                    max(
+                        previous_close,
+                        intermediate_price,
+                    )
+                    * 1.001
+                ),
+                low=(
+                    min(
+                        previous_close,
+                        intermediate_price,
+                    )
+                    * 0.999
+                ),
+                close=intermediate_price,
+                volume=intermediate_volume,
+                source="mock",
+            )
+
+            db.add(snapshot)
+
+            intermediate_prices[
+                stock.id
+            ] = intermediate_price
+
+            today_at_check = (
+                (
+                    intermediate_price
+                    / previous_close
+                )
+                - 1
+            ) * 100
+
+            print(
+                f"{symbol:<12}"
+                f"{previous_close:>14.2f}"
+                f"{intermediate_price:>14.2f}"
+                f"{today_at_check:>+14.2f}%"
+            )
+
+        db.commit()
+
+        # ------------------------------------------------------------------
+        # STEP 4 — SAVE LAST VIEW STATE
+        # ------------------------------------------------------------------
+
+        print()
+        print(
+            "4. Saving intermediate prices as "
+            "'last checked' state..."
+        )
+
+        for uid_str in DEMO_USER_IDS:
+
+            uid = uuid.UUID(
+                uid_str
+            )
+
+            db.execute(
+                delete(UserViewState)
+                .where(
+                    UserViewState.user_id
+                    == uid
+                )
+            )
 
             rows = db.execute(
                 select(
@@ -544,75 +845,55 @@ def cmd_reset():
                 )
                 .join(
                     Stock,
-                    WatchlistItem.stock_id == Stock.id,
+                    WatchlistItem.stock_id
+                    == Stock.id,
                 )
                 .where(
-                    WatchlistItem.user_id == uid
+                    WatchlistItem.user_id
+                    == uid
                 )
             ).all()
 
-            now = datetime.now(timezone.utc)
+            count = 0
 
-            baseline_count = 0
+            for _item, stock in rows:
 
-            print()
-            print(f"  User: {uid_str}")
-
-            for _watchlist_item, stock in rows:
-
-                latest = get_latest_snapshot(
-                    db,
-                    stock.id,
+                intermediate_price = (
+                    intermediate_prices.get(
+                        stock.id
+                    )
                 )
 
-                if latest is None:
-                    print(
-                        f"    WARNING: {stock.symbol} has "
-                        "no historical snapshot; skipping."
-                    )
-
+                if intermediate_price is None:
                     continue
 
                 db.add(
                     UserViewState(
                         user_id=uid,
                         stock_id=stock.id,
-                        last_viewed_at=now,
-                        last_viewed_price=latest.close,
+                        last_viewed_at=intermediate_timestamp,
+                        last_viewed_price=intermediate_price,
                     )
                 )
 
-                baseline_count += 1
-
-                print(
-                    f"    {stock.symbol:<12} "
-                    f"baseline={float(latest.close):>10.2f} "
-                    f"timestamp={latest.timestamp}"
-                )
+                count += 1
 
             db.commit()
 
             print(
-                f"  Established view-state baseline for "
-                f"{baseline_count} stock(s)."
+                f"   {uid_str}: "
+                f"{count} view baseline(s)"
             )
 
-        # ------------------------------------------------------------------
-        # COMPLETE
-        # ------------------------------------------------------------------
-
         print()
-        print("=== RESET COMPLETE ===")
+        print("=" * 78)
+        print("RESET COMPLETE")
+        print("=" * 78)
         print()
 
         print(
-            "Baseline is now each stock's final historical "
-            "observation before the current IST day."
-        )
-
-        print(
-            "Both demo users have just 'viewed' their "
-            "watchlists at those baseline prices."
+            "The database now represents the moment "
+            "both demo users last checked."
         )
 
         print()
@@ -627,9 +908,8 @@ def cmd_reset():
 
         print()
         print(
-            "IMPORTANT: DEMO_MODE=true should remain enabled "
-            "so the background poller cannot overwrite "
-            "the deterministic scenario."
+            "Keep DEMO_MODE=true so the background "
+            "poller cannot mutate the scenario."
         )
 
     except Exception:
@@ -642,23 +922,24 @@ def cmd_reset():
         db.close()
 
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
 # ADVANCE
-# ---------------------------------------------------------------------------
+# ===========================================================================
 
 def cmd_advance():
     """
-    Inject the fixed deterministic market scenario.
+    Advance the market from the persisted last-check state.
 
-    The move for each stock is calculated relative to the clean historical
-    baseline established by reset().
+    IMPORTANT:
+    This is safe to run repeatedly.
 
-    No scoring is performed here.
+    Final prices are ALWAYS computed from UserViewState.last_viewed_price,
+    not whatever the latest database observation happens to be.
 
-    This script writes MARKET OBSERVATIONS only.
+    Any prior final snapshots after the user's last-view timestamp are
+    removed first.
 
-    The actual feature extraction, objective scoring and personalization are
-    still performed by the normal production application code.
+    Therefore repeated calls do not compound the market movement.
     """
 
     db = SessionLocal()
@@ -666,8 +947,14 @@ def cmd_advance():
     try:
 
         print()
-        print("=== ADVANCING DETERMINISTIC MARKET ===")
+        print("=" * 78)
+        print("ADVANCING MARKET TO FINAL DEMO STATE")
+        print("=" * 78)
         print()
+
+        primary_uid = uuid.UUID(
+            PRIMARY_DEMO_USER_ID
+        )
 
         stocks = {
             stock.symbol: stock
@@ -676,122 +963,234 @@ def cmd_advance():
             ).all()
         }
 
-        now = datetime.now(timezone.utc)
-
         applied = []
 
-        for symbol, scenario in SCENARIO.items():
+        for (
+            symbol,
+            scenario,
+        ) in SCENARIO_FINAL.items():
 
-            stock = stocks.get(symbol)
+            stock = stocks.get(
+                symbol
+            )
 
             if stock is None:
                 print(
-                    f"WARNING: {symbol} not found "
-                    "in stocks table; skipping."
+                    f"WARNING: {symbol} not found; skipping"
                 )
-
-                continue
-
-            latest = get_latest_snapshot(
-                db,
-                stock.id,
-            )
-
-            if latest is None:
-                print(
-                    f"WARNING: {symbol} has no prior "
-                    "snapshot; skipping."
-                )
-
                 continue
 
             # --------------------------------------------------------------
-            # BASE PRICE
+            # READ LAST-CHECKED BASELINE
             # --------------------------------------------------------------
 
-            base_price = float(
-                latest.close
+            view_state = db.get(
+                UserViewState,
+                {
+                    "user_id": primary_uid,
+                    "stock_id": stock.id,
+                },
+            )
+
+            if view_state is None:
+
+                raise RuntimeError(
+                    f"{symbol}: no demo view-state exists. "
+                    "Run `python scripts/demo.py reset` first."
+                )
+
+            intermediate_price = float(
+                view_state.last_viewed_price
+            )
+
+            intermediate_timestamp = (
+                view_state.last_viewed_at
+            )
+
+            if intermediate_timestamp.tzinfo is None:
+
+                intermediate_timestamp = (
+                    intermediate_timestamp.replace(
+                        tzinfo=timezone.utc
+                    )
+                )
+
+            # --------------------------------------------------------------
+            # DELETE ANY OLD FINAL DEMO SNAPSHOT
+            # --------------------------------------------------------------
+
+            db.execute(
+                delete(PriceSnapshot)
+                .where(
+                    PriceSnapshot.stock_id
+                    == stock.id,
+
+                    PriceSnapshot.source
+                    == "mock",
+
+                    PriceSnapshot.timestamp
+                    > intermediate_timestamp,
+                )
             )
 
             # --------------------------------------------------------------
-            # NEW PRICE
+            # FINAL PRICE
             # --------------------------------------------------------------
 
-            new_price = round(
-                base_price
+            final_price = round(
+                intermediate_price
                 * (
                     1
-                    + scenario["pct_move"]
+                    + scenario[
+                        "pct_move"
+                    ]
                 ),
                 2,
             )
 
             # --------------------------------------------------------------
-            # HISTORICAL VOLUME BASELINE
+            # FINAL SESSION VOLUME
             # --------------------------------------------------------------
 
-            avg_volume = get_avg_recent_volume(
-                db,
-                stock.id,
-                exclude_today=True,
+            avg_historical_volume = (
+                get_avg_historical_session_volume(
+                    db,
+                    stock.id,
+                )
             )
 
-            new_volume = int(
-                avg_volume
-                * scenario["volume_multiplier"]
+            target_total_volume = int(
+                avg_historical_volume
+                * scenario[
+                    "volume_multiplier"
+                ]
+            )
+
+            intermediate_snapshot = db.scalar(
+                select(PriceSnapshot)
+                .where(
+                    PriceSnapshot.stock_id
+                    == stock.id,
+
+                    PriceSnapshot.source
+                    == "mock",
+
+                    PriceSnapshot.timestamp
+                    == intermediate_timestamp,
+                )
+            )
+
+            if intermediate_snapshot is None:
+
+                raise RuntimeError(
+                    f"{symbol}: intermediate demo snapshot "
+                    "is missing. Run reset first."
+                )
+
+            intermediate_volume = int(
+                intermediate_snapshot.volume
+            )
+
+            final_volume = max(
+                target_total_volume
+                - intermediate_volume,
+                1,
             )
 
             # --------------------------------------------------------------
-            # CREATE OBSERVATION
+            # FINAL TIMESTAMP
+            # --------------------------------------------------------------
+
+            final_timestamp = datetime.now(
+                timezone.utc
+            )
+
+            # Extremely defensive:
+            # ensure the final row is always later than the last-view row.
+            if final_timestamp <= intermediate_timestamp:
+
+                final_timestamp = (
+                    intermediate_timestamp
+                    + timedelta(minutes=1)
+                )
+
+            # --------------------------------------------------------------
+            # CREATE FINAL OBSERVATION
             # --------------------------------------------------------------
 
             snapshot = PriceSnapshot(
                 id=uuid.uuid4(),
                 stock_id=stock.id,
-                timestamp=now,
-                open=base_price,
+                timestamp=final_timestamp,
+                open=intermediate_price,
                 high=(
                     max(
-                        base_price,
-                        new_price,
+                        intermediate_price,
+                        final_price,
                     )
                     * 1.001
                 ),
                 low=(
                     min(
-                        base_price,
-                        new_price,
+                        intermediate_price,
+                        final_price,
                     )
                     * 0.999
                 ),
-                close=new_price,
-                volume=new_volume,
+                close=final_price,
+                volume=final_volume,
                 source="mock",
             )
 
             db.add(snapshot)
 
-            # Calculate the actual rounded movement written to the DB.
-            #
-            # This may differ by a tiny amount from the configured percentage
-            # because prices are rounded to two decimal places.
+            # --------------------------------------------------------------
+            # EXPECTED VALUES
+            # --------------------------------------------------------------
 
-            actual_move_pct = (
-                (
-                    new_price
-                    - base_price
+            previous_snapshot = (
+                get_previous_session_close(
+                    db,
+                    stock.id,
                 )
-                / base_price
-                * 100
             )
+
+            if previous_snapshot is None:
+
+                raise RuntimeError(
+                    f"{symbol}: previous session "
+                    "close missing"
+                )
+
+            previous_close = float(
+                previous_snapshot.close
+            )
+
+            today_pct = (
+                (
+                    final_price
+                    / previous_close
+                )
+                - 1
+            ) * 100
+
+            since_checked_pct = (
+                (
+                    final_price
+                    / intermediate_price
+                )
+                - 1
+            ) * 100
 
             applied.append(
                 (
                     symbol,
-                    base_price,
-                    new_price,
-                    actual_move_pct,
-                    new_volume,
+                    previous_close,
+                    intermediate_price,
+                    final_price,
+                    today_pct,
+                    since_checked_pct,
+                    target_total_volume,
                 )
             )
 
@@ -801,52 +1200,69 @@ def cmd_advance():
         # OUTPUT
         # ------------------------------------------------------------------
 
-        print("Scenario applied:")
-        print()
-
         print(
             f"{'SYMBOL':<12}"
-            f"{'FROM':>12}"
-            f"{'TO':>12}"
-            f"{'MOVE':>12}"
-            f"{'VOLUME':>16}"
+            f"{'PREV':>11}"
+            f"{'CHECKED':>11}"
+            f"{'NOW':>11}"
+            f"{'TODAY':>12}"
+            f"{'SINCE':>12}"
         )
 
-        print("-" * 64)
+        print("-" * 70)
 
         for (
             symbol,
-            base,
-            new,
-            pct,
-            volume,
+            previous,
+            checked,
+            final,
+            today_pct,
+            since_pct,
+            _volume,
         ) in applied:
 
             print(
                 f"{symbol:<12}"
-                f"{base:>12.2f}"
-                f"{new:>12.2f}"
-                f"{pct:>+11.2f}%"
-                f"{volume:>16,}"
+                f"{previous:>11.2f}"
+                f"{checked:>11.2f}"
+                f"{final:>11.2f}"
+                f"{today_pct:>+11.2f}%"
+                f"{since_pct:>+11.2f}%"
             )
 
         print()
-        print("=== ADVANCE COMPLETE ===")
+        print("=" * 78)
+        print("ADVANCE COMPLETE")
+        print("=" * 78)
         print()
 
         print(
-            "The deterministic scenario is now frozen."
-        )
-
-        print(
-            "With DEMO_MODE=true, the background poller "
-            "will not overwrite these observations."
+            "Expected UI distinction:"
         )
 
         print()
+
+        for (
+            symbol,
+            _previous,
+            _checked,
+            _final,
+            today_pct,
+            since_pct,
+            _volume,
+        ) in applied:
+
+            print(
+                f"  {symbol:<12} "
+                f"Today {today_pct:+.2f}%   "
+                f"Since checked {since_pct:+.2f}%"
+            )
+
+        print()
         print(
-            "Refresh /watchlist/changes or the dashboard "
-            "to inspect the new ranking."
+            "With DEMO_MODE=true this state should "
+            "remain unchanged until reset/advance "
+            "is intentionally run again."
         )
 
     except Exception:
@@ -859,19 +1275,21 @@ def cmd_advance():
         db.close()
 
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
 # ENTRY POINT
-# ---------------------------------------------------------------------------
+# ===========================================================================
 
 if __name__ == "__main__":
 
     if (
         len(sys.argv) != 2
-        or sys.argv[1] not in (
+        or sys.argv[1]
+        not in (
             "reset",
             "advance",
         )
     ):
+
         print(
             "Usage: python scripts/demo.py "
             "[reset|advance]"
@@ -882,7 +1300,9 @@ if __name__ == "__main__":
     command = sys.argv[1]
 
     if command == "reset":
+
         cmd_reset()
 
     elif command == "advance":
+
         cmd_advance()
