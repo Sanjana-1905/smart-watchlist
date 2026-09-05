@@ -12,9 +12,11 @@ export default function AttentionScore({ objective, preference, final, level }: 
         <div className="flex justify-between gap-3">
           <dt>Objective significance</dt><dd>{objective.toFixed(1)}</dd>
         </div>
+        <div className="score-track" aria-hidden="true"><span style={{width: `${objective}%`}} /></div>
         <div className="flex justify-between gap-3">
           <dt>Personal relevance</dt><dd>+{preference.toFixed(1)}</dd>
         </div>
+        <div className="score-track personal" aria-hidden="true"><span style={{width: `${preference}%`}} /></div>
         <div className="flex flex-wrap justify-between items-baseline gap-3 border-t border-slate-100 pt-3">
           <dt className="font-semibold text-slate-900">Final attention</dt>
           <dd className={`text-2xl font-bold ${level === 'LOW' ? 'text-slate-500' : 'text-slate-900'}`}>

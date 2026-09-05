@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
-import type { Stock, PriceSnapshot, WatchlistItem } from '../types/market';
-import { api } from '../services/api';
-import AttentionScore from '../components/AttentionScore';
+import type { Analytics } from '../types/analytics';
+import { api, type BasicWatchlistItem } from '../services/api';
 import DataFreshness from '../components/DataFreshness';
+import ReasonsList from '../components/ReasonsList';
+import MarketDelta from '../components/MarketDelta';
+import RelatedContext from '../components/RelatedContext';
+import ShowMath from '../components/ShowMath';
 import PriceChart from '../components/PriceChart';
 
 export default function StockDetail() {
@@ -13,34 +15,54 @@ export default function StockDetail() {
 }
 
 function StockDetailContent({ symbol }: { symbol: string | undefined }) {
-  const [stock, setStock] = useState<Stock | null>(null);
-  const [history, setHistory] = useState<PriceSnapshot[]>([]);
-  const [attention, setAttention] = useState<WatchlistItem | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<Analytics | null>(null);
+  const [watchlistItems, setWatchlistItems] = useState<BasicWatchlistItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [marking, setMarking] = useState(false);
   const [justViewed, setJustViewed] = useState(false);
-
   const [markError, setMarkError] = useState<string | null>(null);
+  const [togglingWatch, setTogglingWatch] = useState(false);
   const markInFlight = useRef(false);
 
   useEffect(() => {
     let active = true;
-    if (!symbol) { setError('Stock not found'); setLoading(false); return; }
-    // Loading a detail page is read-only. Baselines change only on the button action.
-    Promise.all([api.getStock(symbol), api.getStockHistory(symbol), api.getWatchlistChanges()])
-      .then(([stockRes, historyRes, changesRes]) => {
-        if (!active) return;
-        setStock(stockRes);
-        setHistory(historyRes);
-        setAttention(changesRes.items.find(i => i.symbol === symbol.toUpperCase()) ?? null);
+    if (!symbol) { setError('Stock symbol not specified'); return; }
+
+    Promise.all([api.getAnalytics(symbol), api.getWatchlist()])
+      .then(([result, members]) => {
+        if (active) {
+          setData(result);
+          setWatchlistItems(members);
+        }
       })
-      .catch(err => { if (active) setError(err instanceof Error ? err.message : 'Failed to load stock'); })
-      .finally(() => { if (active) setLoading(false); });
+      .catch(err => {
+        if (active) setError(err instanceof Error ? err.message : 'Failed to load stock analytics');
+      });
+
     return () => { active = false; };
   }, [symbol]);
 
-  const handleMarkViewed = async () => {
+  const isWatched = watchlistItems.some(m => m.symbol.toUpperCase() === symbol?.toUpperCase());
+
+  async function handleToggleWatch() {
+    if (!symbol || togglingWatch) return;
+    setTogglingWatch(true);
+    try {
+      if (isWatched) {
+        await api.removeWatchlistStock(symbol);
+      } else {
+        await api.addWatchlistStock(symbol);
+      }
+      const updated = await api.getWatchlist();
+      setWatchlistItems(updated);
+    } catch (err) {
+      setMarkError(err instanceof Error ? err.message : 'Failed to update watchlist');
+    } finally {
+      setTogglingWatch(false);
+    }
+  }
+
+  async function markViewed() {
     if (!symbol || markInFlight.current || justViewed) return;
     markInFlight.current = true;
     setMarking(true);
@@ -49,10 +71,9 @@ function StockDetailContent({ symbol }: { symbol: string | undefined }) {
       await api.markViewed(symbol);
       setJustViewed(true);
       try {
-        const changes = await api.getWatchlistChanges();
-        setAttention(changes.items.find(i => i.symbol === symbol.toUpperCase()) ?? null);
+        setData(await api.getAnalytics(symbol));
       } catch (err) {
-        setMarkError(`Caught-up state saved, but refresh failed: ${err instanceof Error ? err.message : 'Please reload the page.'}`);
+        setMarkError(`Caught-up state saved, but refresh failed: ${err instanceof Error ? err.message : 'Please reload.'}`);
       }
     } catch (err) {
       setMarkError(err instanceof Error ? err.message : 'Failed to mark as caught up');
@@ -60,136 +81,308 @@ function StockDetailContent({ symbol }: { symbol: string | undefined }) {
       markInFlight.current = false;
       setMarking(false);
     }
-  };
-
-  if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-gray-600">Loading...</div>;
   }
 
-  if (error || !stock) {
+  if (error) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 text-gray-600">
-        <p>{error || 'Stock not found'}</p>
-        <Link to="/" className="text-gray-900 font-medium underline">Back to watchlist</Link>
-      </div>
+      <main className="analysis-page">
+        <Link to="/" className="text-link">← Attention Desk</Link>
+        <div role="alert" style={{ borderLeft: '2px solid #dc2626', paddingLeft: '16px', margin: '48px 0' }}>
+          <p style={{ color: '#dc2626', fontWeight: 600 }}>{error}</p>
+          <Link to="/explore" className="text-link" style={{ display: 'block', marginTop: '12px' }}>
+            Browse all companies →
+          </Link>
+        </div>
+      </main>
     );
   }
 
-  const latest = history[history.length - 1];
-  const currentPrice = attention?.current_price ?? (latest ? Number(latest.close) : 0);
-  const level = attention?.attention_level ?? 'LOW';
+  if (!data) return (
+    <main className="analysis-page" role="status">
+      <Link to="/" className="text-link">← Attention Desk</Link>
+      <p className="caption" style={{ marginTop: '48px' }}>Loading stock analysis…</p>
+    </main>
+  );
 
-  const levelPill =
-    level === 'HIGH' ? 'bg-gray-900 text-white' :
-    level === 'MEDIUM' ? 'border border-gray-400 text-gray-700' :
-    'text-gray-400';
+  const { identity, observation, temporal, volatility, volume, technical, attention, personal, final } = data;
+
+  const hasBaseline = temporal.last_viewed_price != null;
+  const sinceCheckedLabel = !hasBaseline
+    ? null
+    : temporal.since_last_view_pct;
+
+  // Sanitize primary reason text
+  function sanitizeReason(msg: string): string {
+    if (!msg) return 'Within normal range';
+    if (msg.toLowerCase().includes('no emitted signal') || msg.toLowerCase().includes('emitted')) {
+      return 'Within normal range';
+    }
+    return msg;
+  }
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans pb-20">
-      <header className="bg-white border-b border-slate-200 px-4 sm:px-8 py-4 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-3xl mx-auto flex flex-wrap gap-3 items-center justify-between">
-          <Link to="/" className="flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors">
-            <ArrowLeft size={16} />
-            Back to watchlist
-          </Link>
-          {attention && (
-            <span className={`px-2.5 py-1 rounded text-[11px] font-bold tracking-wider ${levelPill}`}>
-              {level}
-            </span>
-          )}
+    <main className="analysis-page">
+      <Link className="text-link" to="/">← Attention Desk</Link>
+
+      {/* Header: Identity & Watch Action */}
+      <header className="analysis-heading" style={{ margin: '24px 0 20px' }}>
+        <div>
+          <p className="eyebrow" style={{ color: '#4f46e5' }}>
+            {identity.exchange} · {identity.sector ?? 'General'}
+          </p>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '16px', flexWrap: 'wrap' }}>
+            <h1 style={{ margin: 0 }}>{identity.symbol}</h1>
+            <button
+              type="button"
+              className="secondary-action"
+              onClick={handleToggleWatch}
+              disabled={togglingWatch}
+              style={{ padding: '8px 16px', fontSize: '13px', fontWeight: 600 }}
+            >
+              {togglingWatch ? 'Saving…' : isWatched ? '− In Watchlist' : '+ Add to Watchlist'}
+            </button>
+          </div>
+          <p className="muted" style={{ fontSize: '16px', marginTop: '4px' }}>{identity.company_name}</p>
         </div>
+
+        {/* Attention Score Badge */}
+        {final ? (
+          <div className="attention-total">
+            <span className="eyebrow">Attention</span>
+            <strong style={{ background: final.attention_level === 'HIGH' ? '#bef264' : '#e2e8f0' }}>
+              {final.attention_score}
+            </strong>
+            <span style={{ fontWeight: 600, color: '#475569' }}>{final.attention_level}</span>
+          </div>
+        ) : (
+          <p className="caption">Analytics unavailable</p>
+        )}
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 sm:px-8 py-10 space-y-12">
-        {/* FACT SECTION */}
-        <section className="bg-white rounded-xl border border-slate-200 p-4 sm:p-8 shadow-sm">
-          <div className="mb-6">
-            <h1 className="text-3xl font-bold text-slate-900 leading-tight">{stock.symbol}</h1>
-            <p className="text-sm text-slate-500 mt-1">{stock.company_name}</p>
+      {/* Provenance — compact */}
+      <div style={{ marginBottom: '24px' }}>
+        <DataFreshness freshness={observation.freshness} />
+      </div>
+
+      {/* Prominent Price & Dual Return Comparison */}
+      <section style={{ borderTop: '2px solid #e2e8f0', paddingTop: '28px', marginBottom: '32px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '32px' }}>
+          <div>
+            <p className="eyebrow" style={{ color: '#64748b', marginBottom: '8px' }}>Latest Price</p>
+            <strong style={{ display: 'block', fontSize: 'clamp(32px,5vw,50px)', fontWeight: 500, letterSpacing: '-.03em', color: '#0f172a' }}>
+              {observation.current_price === null ? '—' : `₹${observation.current_price.toFixed(2)}`}
+            </strong>
           </div>
 
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-8 mb-8">
-            <div>
-              <p className="text-3xl sm:text-4xl break-words font-bold text-slate-900 leading-none">₹{currentPrice.toFixed(2)}</p>
-              {attention && (
-                <div className="flex flex-wrap items-center gap-2 mt-3">
-                  <span className={`text-lg font-semibold ${attention.session_change_pct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {attention.session_change_pct >= 0 ? '+' : ''}{attention.session_change_pct.toFixed(2)}%
-                  </span>
-                  <span className="text-sm text-slate-500">Today · vs previous close</span>
-                </div>
-              )}
-            </div>
-
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 sm:p-5 min-w-0">
-              <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Since you checked</p>
-              {attention?.since_last_view_pct != null ? (
-                <>
-                  <p className={`text-2xl font-bold ${attention.since_last_view_pct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {attention.since_last_view_pct >= 0 ? '+' : ''}{attention.since_last_view_pct.toFixed(2)}%
-                  </p>
-                  <p className="text-xs text-slate-400 mt-1">vs your last view</p>
-                </>
-              ) : (
-                <p className="text-lg font-medium text-slate-400 mt-1">No baseline yet</p>
-              )}
-            </div>
-          </div>
-
-          {history.length >= 2 && (
-            <div className="mt-4">
-              <PriceChart data={history} />
-            </div>
-          )}
-        </section>
-
-        {/* INTERPRETATION SECTION */}
-        {attention && attention.reasons.length > 0 && (
-          <section className="bg-white rounded-xl border border-slate-200 p-4 sm:p-8 shadow-sm">
-            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest mb-6">Why this matters</h2>
-            <ul className="space-y-4">
-              {attention.reasons.map((reason, idx) => (
-                <li key={idx} className="flex gap-4 items-start">
-                  <span className="text-slate-400 mt-0.5">•</span>
-                  <p className="text-slate-700 leading-relaxed text-base">{reason.message}</p>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        {/* PERSONALIZATION SECTION */}
-        {attention && (
-          <section className="bg-white rounded-xl border border-slate-200 p-4 sm:p-8 shadow-sm">
-            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-widest mb-6">Attention Score</h2>
-
-            <AttentionScore objective={attention.objective_score} preference={attention.preference_fit} final={attention.attention_score} level={attention.attention_level} />
-
-            <p className="text-sm text-slate-500 italic mt-6 bg-slate-50 p-4 rounded-lg border border-slate-100">
-              Personal relevance reflects movement since your last view and your preferences. Market facts remain the same for everyone.
-            </p>
-          </section>
-        )}
-
-        {/* DATA SOURCE & ACTIONS */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4">
-          <div className="text-xs font-medium text-slate-400">
-            {attention ? (
-              <DataFreshness freshness={attention.freshness} />
-            ) : (
-              <span>Not on your watchlist</span>
+          <div>
+            <p className="eyebrow" style={{ color: '#64748b', marginBottom: '8px' }}>TODAY</p>
+            {temporal.session_change_pct != null
+              ? <MarketDelta value={temporal.session_change_pct} large />
+              : <span className="caption" style={{ color: '#94a3b8' }}>—</span>}
+            {temporal.previous_session_close != null && (
+              <p className="caption" style={{ marginTop: '4px' }}>
+                vs prev close ₹{temporal.previous_session_close.toFixed(2)}
+              </p>
             )}
           </div>
-          <button
-            onClick={handleMarkViewed}
-            disabled={marking || justViewed}
-            className="w-full sm:w-auto px-6 py-3 bg-slate-900 text-white text-sm font-semibold rounded-lg hover:bg-slate-800 disabled:opacity-50 transition-colors shadow-sm"
-          >
-            {marking ? 'Marking...' : justViewed ? '✓ Caught up' : 'Mark as caught up'}
-          </button>
+
+          <div>
+            <p className="eyebrow" style={{ color: '#4f46e5', marginBottom: '8px' }}>SINCE YOU CHECKED</p>
+            {!hasBaseline ? (
+              <div>
+                <p style={{ fontSize: '15px', color: '#94a3b8', fontWeight: 500 }}>Not established yet</p>
+                <p className="caption" style={{ marginTop: '4px', maxWidth: '220px' }}>
+                  Your personal comparison begins after you mark this stock as caught up.
+                </p>
+                <button
+                  className="secondary-action"
+                  disabled={marking || observation.current_price === null}
+                  onClick={markViewed}
+                  style={{ marginTop: '10px', padding: '8px 14px', fontSize: '12px' }}
+                >
+                  {marking ? 'Marking…' : 'Mark as caught up'}
+                </button>
+              </div>
+            ) : (
+              <>
+                <MarketDelta value={sinceCheckedLabel} large />
+                {temporal.last_viewed_price != null && (
+                  <p className="caption" style={{ marginTop: '4px' }}>
+                    vs your saved ₹{temporal.last_viewed_price.toFixed(2)}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
         </div>
-        {markError && <p role="alert" className="text-sm text-red-700">{markError}</p>}
-      </main>
-    </div>
+      </section>
+
+      {/* Real Price History Chart */}
+      <PriceChart
+        history={data.history}
+        lastViewedPrice={temporal.last_viewed_price}
+        lastViewedAt={temporal.last_viewed_at?.toString()}
+        companyName={identity.company_name}
+        symbol={identity.symbol}
+      />
+
+      {/* Market Pattern (Factual Metrics Grid) */}
+      <section style={{ margin: '40px 0', borderTop: '1px solid #e2e8f0', paddingTop: '28px' }}>
+        <p className="eyebrow" style={{ color: '#4f46e5' }}>Market Pattern</p>
+        <h2 style={{ fontSize: '18px', fontWeight: 600, margin: '6px 0 20px' }}>Statistical Context</h2>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '16px' }}>
+          <div style={{ padding: '14px 16px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+            <p className="eyebrow" style={{ marginBottom: '6px' }}>Today</p>
+            <strong style={{ fontSize: '18px' }}>
+              {temporal.session_change_pct != null
+                ? `${temporal.session_change_pct >= 0 ? '+' : ''}${temporal.session_change_pct.toFixed(2)}%`
+                : '—'}
+            </strong>
+          </div>
+
+          <div style={{ padding: '14px 16px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+            <p className="eyebrow" style={{ marginBottom: '6px' }}>5-Session</p>
+            <strong style={{ fontSize: '18px' }}>
+              {temporal.five_session_return_pct != null
+                ? `${temporal.five_session_return_pct >= 0 ? '+' : ''}${temporal.five_session_return_pct.toFixed(2)}%`
+                : '—'}
+            </strong>
+          </div>
+
+          <div style={{ padding: '14px 16px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+            <p className="eyebrow" style={{ marginBottom: '6px' }}>20-Session</p>
+            <strong style={{ fontSize: '18px' }}>
+              {temporal.twenty_session_return_pct != null
+                ? `${temporal.twenty_session_return_pct >= 0 ? '+' : ''}${temporal.twenty_session_return_pct.toFixed(2)}%`
+                : '—'}
+            </strong>
+          </div>
+
+          <div style={{ padding: '14px 16px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+            <p className="eyebrow" style={{ marginBottom: '6px' }}>20d Volatility</p>
+            <strong style={{ fontSize: '18px' }}>
+              {volatility ? `±${(volatility.canonical_value * 100).toFixed(2)}%` : '—'}
+            </strong>
+            {volatility?.floor_applied && (
+              <p className="caption" style={{ marginTop: '2px' }}>Floor applied</p>
+            )}
+          </div>
+
+          <div style={{ padding: '14px 16px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+            <p className="eyebrow" style={{ marginBottom: '6px' }}>Relative Volume</p>
+            <strong style={{ fontSize: '18px' }}>
+              {volume.volume_ratio != null ? `${volume.volume_ratio.toFixed(2)}×` : '—'}
+            </strong>
+            <p className="caption" style={{ marginTop: '2px' }}>vs 20-session avg</p>
+          </div>
+
+          <div style={{ padding: '14px 16px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+            <p className="eyebrow" style={{ marginBottom: '6px' }}>20-Day Range</p>
+            <strong style={{ fontSize: '15px' }}>
+              {technical?.low_20d && technical?.high_20d
+                ? `₹${technical.low_20d.toFixed(0)} – ₹${technical.high_20d.toFixed(0)}`
+                : '—'}
+            </strong>
+          </div>
+
+          <div style={{ padding: '14px 16px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+            <p className="eyebrow" style={{ marginBottom: '6px' }}>Dist. from 20d High</p>
+            <strong style={{ fontSize: '18px' }}>
+              {technical?.distance_from_20d_high_pct != null
+                ? `${technical.distance_from_20d_high_pct.toFixed(2)}%`
+                : '—'}
+            </strong>
+            {technical?.is_new_high && (
+              <p className="caption" style={{ marginTop: '2px', color: '#16a34a' }}>New 20-day high</p>
+            )}
+          </div>
+
+          <div style={{ padding: '14px 16px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+            <p className="eyebrow" style={{ marginBottom: '6px' }}>History</p>
+            <strong style={{ fontSize: '18px' }}>
+              {data.availability.available_history_count ?? data.history.length} obs
+            </strong>
+            <p className="caption" style={{ marginTop: '2px' }}>yfinance rows</p>
+          </div>
+        </div>
+      </section>
+
+      {/* Score Decomposition */}
+      <section style={{ margin: '40px 0', borderTop: '1px solid #e2e8f0', paddingTop: '28px' }}>
+        <p className="eyebrow" style={{ color: '#4f46e5' }}>Why This Attention Score?</p>
+        <h2 style={{ fontSize: '18px', fontWeight: 600, margin: '6px 0 24px' }}>Score Breakdown</h2>
+
+        <div className="analysis-explanation">
+          <div>
+            <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#4f46e5', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '.08em' }}>
+              Market Significance
+            </h3>
+            <strong style={{ display: 'block', fontSize: '40px', fontWeight: 700, letterSpacing: '-.04em', color: '#0f172a' }}>
+              {attention?.objective_score.toFixed(1) ?? '—'}
+            </strong>
+            <p className="caption" style={{ margin: '6px 0 16px' }}>out of 80 · objective market facts</p>
+            <p className="caption" style={{ lineHeight: '1.6' }}>
+              Derived purely from real market data: price returns, volume anomaly, and technical position. Identical for every user.
+            </p>
+            {data.reasons.length > 0 && (
+              <ReasonsList
+                reasons={data.reasons.map(r => ({ ...r, message: sanitizeReason(r.message) }))}
+                maxReasons={data.reasons.length}
+              />
+            )}
+          </div>
+
+          <div>
+            <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '.08em' }}>
+              Your Relevance
+            </h3>
+            <strong style={{ display: 'block', fontSize: '40px', fontWeight: 700, letterSpacing: '-.04em', color: '#4f46e5' }}>
+              +{personal?.preference_fit.toFixed(1) ?? '—'}
+            </strong>
+            <p className="caption" style={{ margin: '6px 0 16px' }}>out of 35 · personal lens</p>
+            <p className="caption" style={{ lineHeight: '1.6' }}>
+              Based on your since-checked baseline and profile preferences (risk, style, horizon). Changes when you update your profile or mark as caught up.
+            </p>
+            <div style={{ marginTop: '20px', padding: '16px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+              <p className="eyebrow" style={{ marginBottom: '8px' }}>Final Attention Score</p>
+              <strong style={{ fontSize: '32px', display: 'block', letterSpacing: '-.04em' }}>
+                {final?.attention_score.toFixed(1) ?? '—'}
+              </strong>
+              <p className="caption" style={{ marginTop: '6px' }}>
+                min({attention?.objective_score.toFixed(1)} + {personal?.preference_fit.toFixed(1)}, 100) = {final?.attention_score.toFixed(1)}
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Show the Math — collapsible, default closed */}
+      <ShowMath data={data} />
+
+      {/* Context */}
+      <RelatedContext symbol={identity.symbol} />
+
+      {/* Explicit Mark Caught-Up Action */}
+      <footer className="analysis-actions">
+        <div>
+          <p className="muted" style={{ margin: 0 }}>
+            Your last-checked baseline changes <em>only</em> when you explicitly click below.
+          </p>
+          <p className="caption" style={{ margin: '4px 0 0' }}>
+            Opening this page is read-only. Your since-checked comparison is not altered.
+          </p>
+        </div>
+        <button
+          className="primary-action"
+          disabled={marking || justViewed || observation.current_price === null}
+          onClick={markViewed}
+          style={{ padding: '14px 28px', fontSize: '14px', fontWeight: 600 }}
+        >
+          {marking ? 'Marking…' : justViewed ? 'Caught Up ✓' : 'Mark as caught up'}
+        </button>
+      </footer>
+      {markError && <p role="alert" style={{ color: '#dc2626', marginTop: '12px' }}>{markError}</p>}
+    </main>
   );
 }

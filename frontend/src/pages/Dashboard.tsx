@@ -1,9 +1,13 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import type { WatchlistResponse } from '../types/market';
-import DataFreshness, { sourceLabel } from '../components/DataFreshness';
-import AttentionCard from '../components/AttentionCard';
+import { Link } from 'react-router-dom';
+import type { WatchlistResponse, BasicWatchlistItem } from '../types/market';
+import AttentionPulse from '../components/AttentionPulse';
+import TemporalLens, { type Lens } from '../components/TemporalLens';
+import FocusedStockPreview from '../components/FocusedStockPreview';
+import MarketDelta from '../components/MarketDelta';
 import AddStockPanel from '../components/AddStockPanel';
+import DataFreshness from '../components/DataFreshness';
+import StarterMarketView from '../components/StarterMarketView';
 import { useAuth } from '../context/AuthContext';
 
 interface DashboardProps {
@@ -11,205 +15,273 @@ interface DashboardProps {
   loading: boolean;
   error: string | null;
   onRefetch: () => void;
+  membership?: BasicWatchlistItem[];
 }
 
-export default function Dashboard({ data, loading, error, onRefetch }: DashboardProps) {
-  const navigate = useNavigate();
-  const { user, logout } = useAuth();
-  const [showAddStock, setShowAddStock] = useState(false);
+export default function Dashboard({ data, loading, error, onRefetch, membership }: DashboardProps) {
+  const { user } = useAuth();
+  const [lens, setLens] = useState<Lens>('since');
+  const [selected, _setSelected] = useState<string | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [showAllQuiet, setShowAllQuiet] = useState(false);
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
-  };
+  if (loading) return (
+    <main className="attention-page" role="status">
+      <p className="caption" style={{ marginTop: '80px' }}>Loading your attention desk…</p>
+    </main>
+  );
+  if (error) return (
+    <main className="attention-page">
+      <div role="alert" style={{ borderLeft: '2px solid #dc2626', paddingLeft: '16px', margin: '48px 0' }}>
+        <p style={{ color: '#dc2626', fontWeight: 600 }}>{error}</p>
+        <button
+          className="text-action"
+          style={{ marginTop: '12px' }}
+          onClick={onRefetch}
+        >
+          Retry →
+        </button>
+      </div>
+    </main>
+  );
+  if (!data) return (
+    <main className="attention-page">
+      <p className="caption" style={{ marginTop: '80px' }}>No market data available.</p>
+    </main>
+  );
 
-  if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-slate-600 bg-slate-50">Loading...</div>;
+  const members = membership ?? data.items.map(i => ({ ...i, added_at: '' }));
+  const highItems = data.items.filter(i => i.attention_level === 'HIGH');
+  const mediumItems = data.items.filter(i => i.attention_level === 'MEDIUM');
+  const lowItems = data.items.filter(i => i.attention_level === 'LOW');
+  const needsAttentionItems = [...highItems, ...mediumItems];
+
+  const focused = data.items.find(i => i.symbol === selected) ?? needsAttentionItems[0] ?? data.items[0];
+
+  // Empty watchlist → show market discovery
+  if (members.length === 0) {
+    return (
+      <main className="attention-page">
+        <div className="landscape-intro" style={{ marginBottom: '8px' }}>
+          <div>
+            <p className="eyebrow" style={{ color: '#4f46e5' }}>
+              Attention Desk · {user?.display_name || user?.email}
+            </p>
+            <h1>Your Attention Desk<span className="intelligence-dot">.</span></h1>
+            <p className="muted">No companies tracked yet. Add your first stock to begin.</p>
+          </div>
+        </div>
+        <div className="market-line">
+          <span>Market Status: <strong>{data.market_status}</strong></span>
+        </div>
+        <StarterMarketView onStockAdded={onRefetch} />
+      </main>
+    );
   }
-
-  if (error) {
-    return <div className="min-h-screen flex items-center justify-center text-red-600 bg-slate-50">Error: {error}</div>;
-  }
-
-  if (!data) {
-    return <div className="min-h-screen flex items-center justify-center bg-slate-50">No data</div>;
-  }
-
-  const isEmpty = data.items.length === 0;
-  // Dashboard "Top 3" meaningful items (HIGH or MEDIUM)
-  const meaningfulItems = data.items.filter(i => i.attention_level === 'HIGH' || i.attention_level === 'MEDIUM').slice(0, 3);
-  const normalItemsCount = data.items.filter(i => i.attention_level === 'LOW').length;
-  const sources = [...new Set(data.items.map(i => sourceLabel(i.freshness.source)))];
-  const watchlistedSymbols = data.items.map(i => i.symbol);
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans">
-      <header className="px-4 sm:px-8 py-4 bg-white border-b border-slate-200">
-        <div className="max-w-7xl mx-auto flex flex-wrap gap-4 justify-between items-center">
-          <h1 className="text-lg font-bold text-slate-900">Smart Watchlist</h1>
-          <div className="flex flex-wrap min-w-0 items-center gap-4 text-sm font-medium">
-            <span className="text-slate-600 break-all">{user?.display_name || user?.email || 'Profile'}</span>
-            <button onClick={handleLogout} className="text-slate-400 hover:text-slate-900 transition-colors">Logout</button>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-8 py-10">
-        <div className="mb-10">
-          <h2 className="text-3xl font-bold text-slate-900 tracking-tight">
-            Welcome back{user?.display_name ? `, ${user.display_name.split(' ')[0]}` : ''}
-          </h2>
-          <div className="text-slate-600 mt-2 flex flex-wrap items-center gap-2">
-            <span>{new Date().toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
-            <span>·</span>
-            <span>Market {data.market_status}</span>
-          </div>
-          <p className="text-sm text-slate-500 mt-1">
-            {sources.length ? sources.join(' · ') : 'No market observations available'}
+    <main className="attention-page">
+      {/* Header: Desk Identity & Status */}
+      <div className="landscape-intro">
+        <div>
+          <p className="eyebrow" style={{ color: '#4f46e5' }}>
+            Attention Desk · {user?.display_name || user?.email}
+          </p>
+          <h1>Market Attention<span className="intelligence-dot">.</span></h1>
+          <p className="muted">
+            What moved enough to deserve your closer inspection.
           </p>
         </div>
+        <TemporalLens value={lens} onChange={setLens} />
+      </div>
 
-        <hr className="border-slate-200 mb-10" />
+      <div className="market-line">
+        <span>Market Status: <strong>{data.market_status}</strong></span>
+        <span>{members.length} watched · {data.items.length} evaluated</span>
+      </div>
 
-        {showAddStock && (
-          <section className="mb-10 bg-white border border-slate-200 rounded-lg p-6 shadow-sm">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-sm font-semibold text-slate-900">Add a stock to your watchlist</h3>
-              <button onClick={() => setShowAddStock(false)} className="text-slate-400 hover:text-slate-900 text-sm">Close</button>
+      {/* Compact Attention Pulse (replaces giant spectrum visualization) */}
+      {data.items.length > 0 && <AttentionPulse items={data.items} />}
+
+      {/* No data yet for watched stocks */}
+      {data.items.length === 0 && members.length > 0 && (
+        <section className="caught-up" style={{ padding: '32px 0' }}>
+          <p className="eyebrow">Awaiting Market Data</p>
+          <h2>No snapshots available.</h2>
+          <p>Your watched stocks are saved, but market history has not been ingested yet.</p>
+        </section>
+      )}
+
+      {data.items.length > 0 && (
+        <>
+          {/* Focused Stock Spotlight */}
+          {focused && <FocusedStockPreview item={focused} lens={lens} />}
+
+          {/* Needs Your Attention */}
+          <section style={{ marginTop: '40px' }}>
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow" style={{ color: '#4f46e5' }}>Ranked by Attention Score</p>
+                <h2>
+                  {needsAttentionItems.length === 0
+                    ? 'Quiet Right Now'
+                    : `Needs Your Attention (${needsAttentionItems.length})`}
+                </h2>
+              </div>
+              <button className="text-action" onClick={() => setShowAdd(!showAdd)}>
+                {showAdd ? 'Close' : '+ Add stock'}
+              </button>
             </div>
-            <AddStockPanel
-              watchlistedSymbols={watchlistedSymbols}
-              onAdded={() => {
-                onRefetch();
-              }}
-            />
-          </section>
-        )}
 
-        {isEmpty ? (
-          <section className="mb-12 py-16 bg-white rounded-lg border border-slate-200 text-center shadow-sm">
-            <h2 className="text-xl font-bold text-slate-900">Your watchlist is empty</h2>
-            <p className="text-slate-600 mt-2 max-w-md mx-auto">
-              Add stocks to start tracking what changes between your visits.
-            </p>
-            <button
-              onClick={() => setShowAddStock(true)}
-              className="mt-6 bg-slate-900 text-white rounded-lg px-6 py-2.5 text-sm font-semibold hover:bg-slate-800 transition-colors shadow-sm"
-            >
-              + Add stock
-            </button>
-          </section>
-        ) : (
-          <>
-            {meaningfulItems.length > 0 ? (
-              <section className="mb-10">
-                <div className="mb-6">
-                  <p className="text-xs font-bold tracking-widest text-slate-500 uppercase mb-2">WHAT DESERVES YOUR ATTENTION</p>
-                  <h3 className="text-lg text-slate-900 font-medium">
-                    {meaningfulItems.length === 3 ? 'Top 3 stocks' : `${meaningfulItems.length} ${meaningfulItems.length === 1 ? 'stock' : 'stocks'}`} to review
-                  </h3>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {meaningfulItems.map((item) => (
-                    <AttentionCard key={item.symbol} item={item} />
-                  ))}
-                </div>
-              </section>
-            ) : (
-              <section className="mb-10 py-16 bg-white rounded-lg border border-slate-200 text-center shadow-sm">
-                <h2 className="text-xl font-bold text-slate-900 mb-2">✓ You're caught up</h2>
-                <p className="text-slate-600 max-w-md mx-auto leading-relaxed">
-                  No watchlist stocks currently have medium or high attention.<br/>
-                  We'll stay quiet until something deserves attention.
+            {showAdd && (
+              <div className="stock-picker">
+                <AddStockPanel watchlistedSymbols={members.map(i => i.symbol)} onAdded={onRefetch} />
+              </div>
+            )}
+
+            {needsAttentionItems.length === 0 ? (
+              <section className="caught-up" style={{ padding: '28px 0' }}>
+                <span className="quiet-orbit" aria-hidden="true" style={{ color: '#16a34a', fontSize: '40px' }}>✓</span>
+                <p className="eyebrow" style={{ color: '#16a34a', marginTop: '8px' }}>All Caught Up</p>
+                <h3 style={{ fontSize: '22px', margin: '6px 0 12px' }}>No unusual movement right now.</h3>
+                <p className="muted">
+                  None of your tracked stocks are showing significant market movement.
                 </p>
               </section>
-            )}
-
-            {normalItemsCount > 0 && meaningfulItems.length > 0 && (
-              <p className="text-sm font-bold text-slate-400 tracking-widest uppercase text-center mb-10">
-                {normalItemsCount} OTHER {normalItemsCount === 1 ? 'STOCK IS' : 'STOCKS ARE'} WITHIN NORMAL RANGES
-              </p>
-            )}
-
-            <hr className="border-slate-200 mb-10" />
-
-            <section>
-              <div className="mb-6 flex flex-wrap gap-4 justify-between items-end">
-                <p className="text-xs font-bold tracking-widest text-slate-500 uppercase">YOUR WATCHLIST</p>
-                <button
-                  onClick={() => setShowAddStock(v => !v)}
-                  className="text-sm font-medium text-slate-900 border border-slate-300 bg-white rounded-lg px-4 py-2 hover:bg-slate-50 transition-colors shadow-sm"
-                >
-                  + Add stock
-                </button>
-              </div>
-
-              <div role="region" aria-label="Watchlist table, scroll horizontally for all columns" tabIndex={0} className="overflow-x-auto bg-white border border-slate-200 rounded-lg shadow-sm">
-                <table className="w-full min-w-[760px] text-sm text-left">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+            ) : (
+              <div className="table-scroll" tabIndex={0} role="region" aria-label="Stocks needing attention">
+                <table>
+                  <thead>
                     <tr>
-                      <th className="py-4 px-6 font-semibold w-1/4">Stock</th>
-                      <th className="text-right py-4 px-6 font-semibold">Price</th>
-                      <th className="text-right py-4 px-6 font-semibold group">
-                        Today
-                        <p className="text-[10px] font-normal text-slate-400 uppercase tracking-wider mt-0.5">vs previous close</p>
-                      </th>
-                      <th className="text-right py-4 px-6 font-semibold group">
-                        Since checked
-                        <p className="text-[10px] font-normal text-slate-400 uppercase tracking-wider mt-0.5">vs your last view</p>
-                      </th>
-                      <th className="text-right py-4 px-6 font-semibold">Attention</th>
+                      <th>Company</th>
+                      <th>Price</th>
+                      <th>Today</th>
+                      <th>Since You Checked</th>
+                      <th>Market Significance</th>
+                      <th>Your Relevance</th>
+                      <th>Attention</th>
+                      <th>Why Now</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {data.items.map((item) => (
-                      <tr
-                        key={item.symbol}
-                        className="hover:bg-slate-50 transition-colors"
-                      >
-                        <td className="py-4 px-6">
-                          <Link className="font-bold text-slate-900 text-base rounded hover:underline" to={`/stock/${item.symbol}`}>{item.symbol}<span className="sr-only"> details</span></Link>
-                          <p className="text-xs text-slate-500 mt-0.5 truncate max-w-[200px]">{item.company_name}</p>
-                          <div className="mt-2"><DataFreshness freshness={item.freshness} /></div>
-                        </td>
-                        <td className="text-right py-4 px-6 font-medium text-slate-900 text-base">₹{item.current_price.toFixed(2)}</td>
-                        <td className={`text-right py-4 px-6 font-medium text-base ${
-                          item.session_change_pct >= 0 ? 'text-green-600' : 'text-red-600'
-                        }`}>
-                          {item.session_change_pct >= 0 ? '+' : ''}{item.session_change_pct.toFixed(2)}%
-                        </td>
-                        <td className="text-right py-4 px-6 font-medium text-base">
-                          {item.since_last_view_pct !== null ? (
-                            <span className={item.since_last_view_pct >= 0 ? 'text-green-600' : 'text-red-600'}>
-                              {item.since_last_view_pct >= 0 ? '+' : ''}{item.since_last_view_pct.toFixed(2)}%
-                            </span>
-                          ) : (
-                            <span className="text-slate-500">No baseline yet</span>
-                          )}
-                        </td>
-                        <td className="text-right py-4 px-6">
-                          <div className="flex justify-end items-center gap-3">
-                            <span className={`font-bold text-base ${item.attention_level === 'LOW' ? 'text-slate-400' : 'text-slate-900'}`}>
+                  <tbody>
+                    {needsAttentionItems.map(item => {
+                      const unusual = item.reasons.find(r => r.type === 'UNUSUAL_RETURN');
+                      const primaryReason = item.reasons[0]?.message ?? 'Within normal range';
+                      const sinceCheckedLabel = item.since_last_view_pct == null
+                        ? <span className="caption" style={{ color: '#94a3b8' }}>— First view</span>
+                        : <MarketDelta value={item.since_last_view_pct} />;
+                      return (
+                        <tr key={item.symbol} style={{ background: selected === item.symbol ? '#eef2ff' : undefined }}>
+                          <td>
+                            <Link to={`/stock/${item.symbol}`} style={{ color: '#4f46e5', fontWeight: 700 }}>
+                              {item.symbol}
+                            </Link>
+                            <small>{item.company_name}</small>
+                            <DataFreshness freshness={item.freshness} compact />
+                          </td>
+                          <td style={{ fontWeight: 600 }}>₹{item.current_price.toFixed(2)}</td>
+                          <td><MarketDelta value={item.session_change_pct} /></td>
+                          <td>
+                            {sinceCheckedLabel}
+                          </td>
+                          <td>
+                            <strong style={{ fontSize: '14px' }}>{item.objective_score.toFixed(1)}</strong>
+                            <small style={{ display: 'block', color: '#64748b' }}>/ 80</small>
+                          </td>
+                          <td>
+                            <strong style={{ fontSize: '14px', color: '#4f46e5' }}>+{item.preference_fit.toFixed(1)}</strong>
+                            <small style={{ display: 'block', color: '#64748b' }}>/ 35</small>
+                          </td>
+                          <td>
+                            <span
+                              style={{
+                                display: 'inline-block',
+                                padding: '3px 8px',
+                                borderRadius: '4px',
+                                background: item.attention_level === 'HIGH' ? '#bef264' : '#e2e8f0',
+                                color: '#0f172a',
+                                fontWeight: 700,
+                                fontSize: '13px',
+                              }}
+                            >
                               {item.attention_score.toFixed(1)}
                             </span>
-                            <span className={`px-2.5 py-1 rounded text-[11px] font-bold tracking-wider ${
-                              item.attention_level === 'HIGH' ? 'bg-slate-900 text-white' :
-                              item.attention_level === 'MEDIUM' ? 'border border-slate-300 text-slate-600 bg-slate-50' :
-                              'text-slate-400'
-                            }`}>
-                              {item.attention_level}
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                            <small style={{ display: 'block', color: '#64748b' }}>{item.attention_level}</small>
+                          </td>
+                          <td style={{ fontSize: '12px', color: '#334155' }}>
+                            {unusual
+                              ? `${unusual.value}× normal move`
+                              : primaryReason === 'No emitted signal' || primaryReason.includes('emitted')
+                                ? 'Within normal range'
+                                : primaryReason}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
+            )}
+          </section>
+
+          {/* Quiet Right Now — compact, collapsible if large */}
+          {lowItems.length > 0 && (
+            <section style={{ marginTop: '48px', borderTop: '1px solid #e2e8f0', paddingTop: '28px' }}>
+              <div className="section-heading" style={{ marginBottom: '16px' }}>
+                <div>
+                  <p className="eyebrow" style={{ color: '#94a3b8' }}>Within normal range</p>
+                  <h3 style={{ fontSize: '16px', color: '#64748b', margin: '4px 0 0' }}>
+                    Quiet Right Now ({lowItems.length})
+                  </h3>
+                </div>
+              </div>
+              <div className="table-scroll" tabIndex={0} role="region" aria-label="Quiet stocks">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Stock</th>
+                      <th>Price</th>
+                      <th>Today</th>
+                      <th>Since You Checked</th>
+                      <th>Attention</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(showAllQuiet ? lowItems : lowItems.slice(0, 5)).map(item => {
+                      const sinceCheckedLabel = item.since_last_view_pct == null
+                        ? <span className="caption" style={{ color: '#94a3b8' }}>— First view</span>
+                        : <MarketDelta value={item.since_last_view_pct} />;
+                      return (
+                        <tr key={item.symbol} style={{ opacity: 0.75 }}>
+                          <td>
+                            <Link to={`/stock/${item.symbol}`} style={{ color: '#475569', fontWeight: 600 }}>
+                              {item.symbol}
+                            </Link>
+                            <small>{item.company_name}</small>
+                          </td>
+                          <td>₹{item.current_price.toFixed(2)}</td>
+                          <td><MarketDelta value={item.session_change_pct} /></td>
+                          <td>{sinceCheckedLabel}</td>
+                          <td style={{ color: '#64748b' }}>{item.attention_score.toFixed(1)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {lowItems.length > 5 && (
+                <button
+                  className="text-action"
+                  style={{ marginTop: '12px' }}
+                  onClick={() => setShowAllQuiet(v => !v)}
+                >
+                  {showAllQuiet ? 'Show less ↑' : `Show all ${lowItems.length} quiet stocks ↓`}
+                </button>
+              )}
             </section>
-          </>
-        )}
-      </main>
-    </div>
+          )}
+        </>
+      )}
+    </main>
   );
 }

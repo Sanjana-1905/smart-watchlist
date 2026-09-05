@@ -1,0 +1,217 @@
+{
+  "verified_at": "2026-09-05",
+  "symbol_verification_source": "https://www.nseindia.com/?view=desktop",
+  "note": "Metadata only. Existing historical entries retained. Additional symbols verified against the official NSE ticker; no market history or watchlist membership is imported.",
+  "stocks": [
+    {
+      "symbol": "RELIANCE",
+      "company_name": "Reliance Industries",
+      "exchange": "NSE",
+      "sector": "Energy"
+    },
+    {
+      "symbol": "TCS",
+      "company_name": "Tata Consultancy Services",
+      "exchange": "NSE",
+      "sector": "IT"
+    },
+    {
+      "symbol": "INFY",
+      "company_name": "Infosys",
+      "exchange": "NSE",
+      "sector": "IT"
+    },
+    {
+      "symbol": "HDFCBANK",
+      "company_name": "HDFC Bank",
+      "exchange": "NSE",
+      "sector": "Banking"
+    },
+    {
+      "symbol": "ICICIBANK",
+      "company_name": "ICICI Bank",
+      "exchange": "NSE",
+      "sector": "Banking"
+    },
+    {
+      "symbol": "SBIN",
+      "company_name": "State Bank of India",
+      "exchange": "NSE",
+      "sector": "Banking"
+    },
+    {
+      "symbol": "BHARTIARTL",
+      "company_name": "Bharti Airtel",
+      "exchange": "NSE",
+      "sector": "Telecom"
+    },
+    {
+      "symbol": "ITC",
+      "company_name": "ITC Limited",
+      "exchange": "NSE",
+      "sector": "FMCG"
+    },
+    {
+      "symbol": "LT",
+      "company_name": "Larsen & Toubro",
+      "exchange": "NSE",
+      "sector": "Infrastructure"
+    },
+    {
+      "symbol": "AXISBANK",
+      "company_name": "Axis Bank",
+      "exchange": "NSE",
+      "sector": "Banking"
+    },
+    {
+      "symbol": "SUNPHARMA",
+      "company_name": "Sun Pharma",
+      "exchange": "NSE",
+      "sector": "Pharma"
+    },
+    {
+      "symbol": "MARUTI",
+      "company_name": "Maruti Suzuki",
+      "exchange": "NSE",
+      "sector": "Auto"
+    },
+    {
+      "symbol": "TATASTEEL",
+      "company_name": "Tata Steel",
+      "exchange": "NSE",
+      "sector": "Metals"
+    },
+    {
+      "symbol": "BEL",
+      "company_name": "Bharat Electronics",
+      "exchange": "NSE",
+      "sector": "Defence"
+    },
+    {
+      "symbol": "HAL",
+      "company_name": "Hindustan Aeronautics",
+      "exchange": "NSE",
+      "sector": "Defence"
+    },
+    {
+      "symbol": "TRENT",
+      "company_name": "Trent Limited",
+      "exchange": "NSE",
+      "sector": "Retail"
+    },
+    {
+      "symbol": "HCLTECH",
+      "company_name": "HCL Technologies",
+      "exchange": "NSE",
+      "sector": "Technology"
+    },
+    {
+      "symbol": "WIPRO",
+      "company_name": "Wipro",
+      "exchange": "NSE",
+      "sector": "Technology"
+    },
+    {
+      "symbol": "TECHM",
+      "company_name": "Tech Mahindra",
+      "exchange": "NSE",
+      "sector": "Technology"
+    },
+    {
+      "symbol": "KOTAKBANK",
+      "company_name": "Kotak Mahindra Bank",
+      "exchange": "NSE",
+      "sector": "Banking"
+    },
+    {
+      "symbol": "ONGC",
+      "company_name": "Oil & Natural Gas Corporation",
+      "exchange": "NSE",
+      "sector": "Energy"
+    },
+    {
+      "symbol": "NTPC",
+      "company_name": "NTPC",
+      "exchange": "NSE",
+      "sector": "Energy"
+    },
+    {
+      "symbol": "POWERGRID",
+      "company_name": "Power Grid Corporation of India",
+      "exchange": "NSE",
+      "sector": "Energy"
+    },
+    {
+      "symbol": "COALINDIA",
+      "company_name": "Coal India",
+      "exchange": "NSE",
+      "sector": "Energy"
+    },
+    {
+      "symbol": "M&M",
+      "company_name": "Mahindra & Mahindra",
+      "exchange": "NSE",
+      "sector": "Automobile"
+    },
+    {
+      "symbol": "BAJAJ-AUTO",
+      "company_name": "Bajaj Auto",
+      "exchange": "NSE",
+      "sector": "Automobile"
+    },
+    {
+      "symbol": "EICHERMOT",
+      "company_name": "Eicher Motors",
+      "exchange": "NSE",
+      "sector": "Automobile"
+    },
+    {
+      "symbol": "HINDUNILVR",
+      "company_name": "Hindustan Unilever",
+      "exchange": "NSE",
+      "sector": "Consumer"
+    },
+    {
+      "symbol": "NESTLEIND",
+      "company_name": "Nestle India",
+      "exchange": "NSE",
+      "sector": "Consumer"
+    },
+    {
+      "symbol": "TITAN",
+      "company_name": "Titan Company",
+      "exchange": "NSE",
+      "sector": "Consumer"
+    },
+    {
+      "symbol": "ASIANPAINT",
+      "company_name": "Asian Paints",
+      "exchange": "NSE",
+      "sector": "Consumer"
+    },
+    {
+      "symbol": "DRREDDY",
+      "company_name": "Dr. Reddy\u2019s Laboratories",
+      "exchange": "NSE",
+      "sector": "Pharma"
+    },
+    {
+      "symbol": "CIPLA",
+      "company_name": "Cipla",
+      "exchange": "NSE",
+      "sector": "Pharma"
+    },
+    {
+      "symbol": "HINDALCO",
+      "company_name": "Hindalco Industries",
+      "exchange": "NSE",
+      "sector": "Metals"
+    },
+    {
+      "symbol": "JSWSTEEL",
+      "company_name": "JSW Steel",
+      "exchange": "NSE",
+      "sector": "Metals"
+    }
+  ]
+}

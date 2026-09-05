@@ -1,7 +1,17 @@
+import type { Analytics } from '../types/analytics';
 import type {
   WatchlistResponse,
   BasicWatchlistItem,
   UserProfile,
+  Stock,
+  PriceSnapshot,
+} from '../types/market';
+
+export type {
+  WatchlistResponse,
+  BasicWatchlistItem,
+  UserProfile,
+  UserProfile as Profile,
   Stock,
   PriceSnapshot,
 } from '../types/market';
@@ -102,7 +112,24 @@ export const onboardingApi = {
   },
 };
 
+export interface StockContext {
+  symbol: string; status: 'AVAILABLE' | 'EMPTY' | 'UNAVAILABLE'; provenance: string; verified_at: string | null;
+  items: { headline: string; source: string; published_date: string; url: string }[];
+}
 export const api = {
+  async getContext(symbol: string, signal?: AbortSignal): Promise<StockContext> {
+    const res = await authFetch(`/stocks/${encodeURIComponent(symbol)}/context`, { signal });
+    if (!res.ok) throw new Error('Related context unavailable');
+    return res.json();
+  },
+  async getAnalytics(symbol: string): Promise<Analytics> {
+    const res = await authFetch(`/stocks/${encodeURIComponent(symbol)}/analytics`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error?.message || 'Failed to load analytics');
+    }
+    return res.json();
+  },
   async getWatchlistChanges(): Promise<WatchlistResponse> {
     const res = await authFetch('/watchlist/changes');
     if (!res.ok) throw new Error('Failed to fetch watchlist changes');

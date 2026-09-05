@@ -1,11 +1,16 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import AppShell from './components/AppShell';
 import ProtectedRoute from './components/ProtectedRoute';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import OnboardingPage from './pages/OnboardingPage';
 import DashboardPage from './pages/DashboardPage';
+import ExplorePage from './pages/ExplorePage';
 import StockDetail from './pages/StockDetail';
+
+import ProfilePage from './pages/ProfilePage';
+import UpdatesPage from './pages/UpdatesPage';
 
 function App() {
   return (
@@ -26,15 +31,18 @@ function App() {
             path="/"
             element={
               <ProtectedRoute>
-                <DashboardPage />
+                <AppShell><DashboardPage /></AppShell>
               </ProtectedRoute>
             }
           />
+          <Route path="/explore" element={<ProtectedRoute><AppShell><ExplorePage /></AppShell></ProtectedRoute>} />
+          <Route path="/updates" element={<ProtectedRoute><AppShell><UpdatesPage /></AppShell></ProtectedRoute>} />
+          <Route path="/profile" element={<ProtectedRoute><AppShell><ProfilePage /></AppShell></ProtectedRoute>} />
           <Route
             path="/stock/:symbol"
             element={
               <ProtectedRoute>
-                <StockDetail />
+                <AppShell><StockDetail /></AppShell>
               </ProtectedRoute>
             }
           />
@@ -43,5 +51,6 @@ function App() {
     </BrowserRouter>
   );
 }
+
 
 export default App;
