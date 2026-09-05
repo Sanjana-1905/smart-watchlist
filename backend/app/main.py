@@ -9,7 +9,7 @@ import redis
 from app.core.config import settings
 from app.core.errors import AppError
 from app.core.database import engine
-from app.api import stocks, watchlist, profile, auth
+from app.api import stocks, watchlist, profile, auth, onboarding
 from app.jobs.market_poll import start_scheduler
 
 logger = logging.getLogger("app")
@@ -25,6 +25,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(onboarding.router)
 app.include_router(stocks.router)
 app.include_router(watchlist.router)
 app.include_router(profile.router)

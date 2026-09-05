@@ -27,6 +27,7 @@ def register_user(db: Session, email: str, password: str, display_name: str | No
         attention_style="BALANCED",
         time_horizon="LONG_TERM",
         version=1,
+        onboarding_completed=False,
     ))
     db.commit()
     db.refresh(user)

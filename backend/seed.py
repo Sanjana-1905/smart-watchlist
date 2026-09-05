@@ -7,8 +7,7 @@ On first run (no demo user exists): full seed — creates demo user, profile,
 
 On every subsequent run: skips the full seed entirely (never touches existing
 price_snapshots, user_view_state, or user_profiles), and only self-heals the
-demo watchlist by re-adding any of the 5 target symbols that are missing
-(e.g. removed during manual testing).
+demo watchlist / credentials / onboarding flag if something is missing.
 
 Safe to run on every container startup.
 """
@@ -41,6 +40,18 @@ def ensure_demo_credentials(db):
         print(f"  Set demo login credentials: {DEMO_EMAIL} / {DEMO_PASSWORD}")
     else:
         print(f"  Demo login already set: {DEMO_EMAIL}")
+
+
+def ensure_demo_onboarding_completed(db):
+    """The demo user's profile is a real, intentional starting point — not a
+    cold-start default — so it should never be routed through onboarding."""
+    profile = db.get(UserProfile, DEMO_USER_ID)
+    if profile and not profile.onboarding_completed:
+        profile.onboarding_completed = True
+        db.commit()
+        print("  Marked demo user onboarding as complete")
+    else:
+        print("  Demo user onboarding already complete")
 
 
 def ensure_watchlist_symbols(db):
@@ -77,6 +88,7 @@ def main():
         if existing_user:
             print("Demo user already exists — skipping full seed (non-destructive).")
             ensure_demo_credentials(db)
+            ensure_demo_onboarding_completed(db)
             ensure_watchlist_symbols(db)
             print("Seed check complete.")
             return
@@ -98,6 +110,7 @@ def main():
             attention_style="BALANCED",
             time_horizon="LONG_TERM",
             version=1,
+            onboarding_completed=True,
         ))
 
         print("Loading fixture...")

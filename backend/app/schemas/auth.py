@@ -29,6 +29,4 @@ class UserOut(BaseModel):
     id: uuid.UUID
     email: str | None
     display_name: str | None
-
-    class Config:
-        from_attributes = True
+    onboarding_completed: bool
