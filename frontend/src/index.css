@@ -1,36 +1,36 @@
 @import "tailwindcss";
 
 @theme {
-  --color-canvas: #f3f1ea;
-  --color-surface: #fbfaf7;
-  --color-graphite: #17171b;
-  --color-intelligence: #6857e5;
-  --color-intelligence-soft: #e9e5ff;
-  --color-attention: #d7ff5f;
+  --color-canvas: #ffffff;
+  --color-surface: #fafafa;
+  --color-graphite: #0f172a;
+  --color-intelligence: #4f46e5;
+  --color-intelligence-soft: #eef2ff;
+  --color-attention: #bef264;
   /* Existing utility classes inherit the theme without changing their behavior. */
-  --color-white: #fbfaf7;
-  --color-slate-50: #f3f1ea;
-  --color-slate-100: #e9e6dd;
-  --color-slate-200: #dcd8ce;
-  --color-slate-300: #bcb8b0;
-  --color-slate-400: #73717b;
-  --color-slate-500: #667085;
-  --color-slate-600: #56545f;
-  --color-slate-700: #3e3c47;
-  --color-slate-800: #292731;
-  --color-slate-900: #17171b;
-  --color-gray-50: #f3f1ea;
-  --color-gray-100: #e9e6dd;
-  --color-gray-200: #dcd8ce;
-  --color-gray-300: #bcb8b0;
-  --color-gray-400: #73717b;
-  --color-gray-500: #667085;
-  --color-gray-600: #56545f;
-  --color-gray-700: #3e3c47;
-  --color-gray-800: #292731;
-  --color-gray-900: #17171b;
-  --color-green-600: #079455;
-  --color-red-600: #d92d20;
+  --color-white: #ffffff;
+  --color-slate-50: #f8fafc;
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1e293b;
+  --color-slate-900: #0f172a;
+  --color-gray-50: #f8fafc;
+  --color-gray-100: #f1f5f9;
+  --color-gray-200: #e2e8f0;
+  --color-gray-300: #cbd5e1;
+  --color-gray-400: #94a3b8;
+  --color-gray-500: #64748b;
+  --color-gray-600: #475569;
+  --color-gray-700: #334155;
+  --color-gray-800: #1e293b;
+  --color-gray-900: #0f172a;
+  --color-green-600: #16a34a;
+  --color-red-600: #dc2626;
   --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -137,3 +137,12 @@ svg.text-green-600 { color: var(--color-intelligence); }
 .score-track{height:5px;background:var(--line);width:100%}.score-track span{height:100%;display:block;background:var(--ink)}.score-track.personal span{background:var(--intelligence)}.math-bar meter::-webkit-meter-optimum-value{background:var(--intelligence)}.math-bar meter::-moz-meter-bar{background:var(--intelligence)}.normal-range{width:100%;display:block;margin:20px 0}
 
 .primary-action{padding:14px 22px;background:var(--ink);color:var(--surface);font-size:13px;border-radius:4px}.text-link{color:var(--intelligence);font-size:13px}.primary-action:hover:not(:disabled){background:var(--color-slate-700)}
+
+/* Screen-reader only utility */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+/* Skeleton loading pulse */
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* Starter market table */
+.starter-market .table-scroll table{min-width:560px}

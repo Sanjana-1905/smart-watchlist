@@ -9,6 +9,9 @@ import DashboardPage from './pages/DashboardPage';
 import ExplorePage from './pages/ExplorePage';
 import StockDetail from './pages/StockDetail';
 
+import ProfilePage from './pages/ProfilePage';
+import UpdatesPage from './pages/UpdatesPage';
+
 function App() {
   return (
     <BrowserRouter>
@@ -33,6 +36,8 @@ function App() {
             }
           />
           <Route path="/explore" element={<ProtectedRoute><AppShell><ExplorePage /></AppShell></ProtectedRoute>} />
+          <Route path="/updates" element={<ProtectedRoute><AppShell><UpdatesPage /></AppShell></ProtectedRoute>} />
+          <Route path="/profile" element={<ProtectedRoute><AppShell><ProfilePage /></AppShell></ProtectedRoute>} />
           <Route
             path="/stock/:symbol"
             element={
@@ -46,5 +51,6 @@ function App() {
     </BrowserRouter>
   );
 }
+
 
 export default App;

@@ -70,34 +70,8 @@ NSE_CLOSE_MINUTE = 30
 #      failing at download time.
 # ---------------------------------------------------------------------------
 
-# Explicit overrides — only entries that differ from "<SYMBOL>.NS"
-_TICKER_OVERRIDES: dict[str, str | None] = {
-    # NSE symbol          Yahoo Finance ticker
-    # M&M: ampersand is preserved — yfinance handles "M&M.NS" correctly
-    "M&M":        "M&M.NS",
-    # BAJAJ-AUTO: Yahoo Finance preserves the hyphen as "BAJAJ-AUTO.NS"
-    # (BAJAJAUT.NS returns 404; the default .NS suffix rule would also work,
-    #  but this entry makes the decision explicit and tested)
-    "BAJAJ-AUTO": "BAJAJ-AUTO.NS",
-}
+from app.providers.ticker_map import symbol_to_yahoo_ticker
 
-# Symbols we know to be unavailable on Yahoo Finance NSE feed; set to None
-# to skip them gracefully rather than wasting a network call.
-_UNSUPPORTED: set[str] = set()
-
-
-def symbol_to_yahoo_ticker(symbol: str) -> str | None:
-    """
-    Convert an internal NSE symbol to a Yahoo Finance ticker string.
-
-    Returns None for symbols that are not available on Yahoo Finance.
-    """
-    if symbol in _UNSUPPORTED:
-        return None
-    if symbol in _TICKER_OVERRIDES:
-        return _TICKER_OVERRIDES[symbol]
-    # Default: append .NS
-    return f"{symbol}.NS"
 
 
 # ---------------------------------------------------------------------------

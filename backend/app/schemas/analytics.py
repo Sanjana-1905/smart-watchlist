@@ -35,6 +35,8 @@ class AnalyticsTemporal(BaseModel):
     last_viewed_at: datetime | None
     since_last_view_pct: float | None
     since_view_return: float | None
+    five_session_return_pct: float | None = None
+    twenty_session_return_pct: float | None = None
 
 class AnalyticsVolume(BaseModel):
     current_session_volume: float | None
@@ -54,6 +56,9 @@ class AnalyticsTechnical(BaseModel):
     previous_window_max_close: float
     sample_count: int
     is_new_high: bool
+    high_20d: float | None = None
+    low_20d: float | None = None
+    distance_from_20d_high_pct: float | None = None
 
 class AnalyticsAttention(BaseModel):
     return_contribution: float
@@ -77,6 +82,8 @@ class AnalyticsFinal(BaseModel):
 class AnalyticsAvailability(BaseModel):
     analytics_available: bool
     reason: str | None
+    available_history_count: int = 0
+
 
 class AnalyticsHistoryPoint(BaseModel):
     timestamp: datetime

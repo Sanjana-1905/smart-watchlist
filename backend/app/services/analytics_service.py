@@ -21,6 +21,13 @@ def build_analytics(db, stock, user_id):
     latest = history[-1] if history else None
     features = extract_features(db, stock.id, user_id)
     freshness = evaluate_freshness(latest.timestamp if latest else None, latest.source if latest else 'unknown')
+    five_ret = round(((closes[-1] / closes[-6]) - 1) * 100, 2) if len(closes) >= 6 else None
+    twenty_ret = round(((closes[-1] / closes[-21]) - 1) * 100, 2) if len(closes) >= 21 else None
+    recent_20 = closes[-20:] if len(closes) >= 20 else closes
+    high_20d = max(recent_20) if recent_20 else None
+    low_20d = min(recent_20) if recent_20 else None
+    dist_high = round(((closes[-1] / high_20d) - 1) * 100, 2) if high_20d and high_20d > 0 else None
+
     response = {
         'identity': dict(symbol=stock.symbol, company_name=stock.company_name, exchange=stock.exchange,
             sector=stock.sector, is_in_watchlist=watchlist_repository.get_item(db, user_id, stock.id) is not None),
@@ -35,14 +42,17 @@ def build_analytics(db, stock, user_id):
             last_viewed_price=float(view.last_viewed_price) if view else None,
             last_viewed_at=view.last_viewed_at if view else None,
             since_last_view_pct=features.since_view_return * 100 if features and features.since_view_return is not None else None,
-            since_view_return=features.since_view_return if features else None),
+            since_view_return=features.since_view_return if features else None,
+            five_session_return_pct=five_ret,
+            twenty_session_return_pct=twenty_ret),
         'volume': dict(current_session_volume=volumes[-1] if volumes else None,
             baseline_average_volume=sum(volumes[-21:-1])/len(volumes[-21:-1]) if len(volumes)>1 else None,
             baseline_sample_count=len(volumes[-21:-1]), volume_ratio=features.volume_ratio if features else None),
         'volatility': None, 'technical': None, 'attention': None, 'personal': None, 'final': None,
         'reasons': [],
         'availability': dict(analytics_available=features is not None,
-            reason=None if features else 'At least two distinct trading sessions are required.'),
+            reason=None if features else f'{len(sessions)} session(s) available; 2 distinct trading sessions required.',
+            available_history_count=len(history)),
         'history': [dict(timestamp=row.timestamp, close=float(row.close), volume=row.volume, source=row.source) for row in history],
     }
     if not features:
@@ -60,7 +70,8 @@ def build_analytics(db, stock, user_id):
         volatility=dict(canonical_value=features.volatility_20d, raw_value=raw_volatility, effective_floor=0.005,
             floor_applied=raw_volatility is None or raw_volatility<0.005, sample_count=len(returns),
             unusualness_ratio=abs(features.session_return)/features.volatility_20d),
-        technical=dict(previous_window_max_close=max(closes[-21:-1]), sample_count=len(closes[-21:-1]), is_new_high=features.new_20d_high),
+        technical=dict(previous_window_max_close=max(closes[-21:-1]), sample_count=len(closes[-21:-1]), is_new_high=features.new_20d_high,
+            high_20d=high_20d, low_20d=low_20d, distance_from_20d_high_pct=dist_high),
         attention=dict(return_contribution=return_pts, volume_contribution=volume_pts, technical_contribution=technical_pts,
             objective_exact=return_pts+volume_pts+technical_pts, objective_score=result.objective_score),
         personal=dict(since_view_contribution=view_pts, profile_contribution=profile_pts,

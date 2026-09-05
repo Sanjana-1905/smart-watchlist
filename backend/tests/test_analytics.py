@@ -40,7 +40,10 @@ def test_analytics_canonical_inputs_decomposition_and_read_only(client, isolated
     assert a['volatility']['floor_applied'] is True
     assert a['volatility']['sample_count'] == 1
     assert a['volatility']['unusualness_ratio'] == pytest.approx(8)
-    assert a['technical'] == dict(previous_window_max_close=100,sample_count=1,is_new_high=True)
+    assert a['technical']['previous_window_max_close'] == 100
+    assert a['technical']['sample_count'] == 1
+    assert a['technical']['is_new_high'] is True
+
     assert a['attention'] == b['attention']
     assert a['personal'] != b['personal']
     for data in [a,b]:
