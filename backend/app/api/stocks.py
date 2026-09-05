@@ -14,6 +14,11 @@ def _get_stock_or_404(symbol: str, db: Session):
         raise AppError(404, "STOCK_NOT_FOUND", f"No stock with symbol {symbol}")
     return stock
 
+@router.get("", response_model=list[StockOut])
+def list_stocks(db: Session = Depends(get_db)):
+    """Full catalog — public, since this is just the market universe, not user data."""
+    return stock_repository.get_all(db)
+
 @router.get("/{symbol}", response_model=StockOut)
 def get_stock(symbol: str, db: Session = Depends(get_db)):
     return _get_stock_or_404(symbol, db)

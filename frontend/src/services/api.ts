@@ -9,10 +9,6 @@ import { getToken, clearToken } from './authStorage';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
 
-/**
- * Fires a global event so AuthContext can react to session expiry/invalidation
- * without api.ts needing to know about React state.
- */
 async function authFetch(path: string, options: RequestInit = {}): Promise<Response> {
   const token = getToken();
   const headers = new Headers(options.headers || {});
@@ -32,11 +28,29 @@ export interface AuthUser {
   id: string;
   email: string | null;
   display_name: string | null;
+  onboarding_completed: boolean;
 }
 
 export interface TokenResponse {
   access_token: string;
   token_type: string;
+}
+
+export type AttentionPriority = 'UPWARD_MOVEMENT' | 'DOWNSIDE_RISK' | 'BALANCED';
+export type MovementSensitivity = 'SELECTIVE' | 'BALANCED' | 'HIGH_MOVEMENT';
+export type TimeHorizonAnswer = 'SHORT_TERM' | 'LONG_TERM';
+
+export interface OnboardingAnswers {
+  attention_priority: AttentionPriority;
+  movement_sensitivity: MovementSensitivity;
+  time_horizon: TimeHorizonAnswer;
+}
+
+export interface OnboardingResult {
+  risk_profile: string;
+  attention_style: string;
+  time_horizon: string;
+  onboarding_completed: boolean;
 }
 
 export const authApi = {
@@ -69,6 +83,21 @@ export const authApi = {
   async me(): Promise<AuthUser> {
     const res = await authFetch('/auth/me');
     if (!res.ok) throw new Error('Failed to fetch current user');
+    return res.json();
+  },
+};
+
+export const onboardingApi = {
+  async submit(answers: OnboardingAnswers): Promise<OnboardingResult> {
+    const res = await authFetch('/onboarding', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(answers),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error?.message || 'Failed to save onboarding answers');
+    }
     return res.json();
   },
 };
@@ -134,6 +163,12 @@ export const api = {
   async getStockHistory(symbol: string): Promise<PriceSnapshot[]> {
     const res = await authFetch(`/stocks/${symbol}/history`);
     if (!res.ok) throw new Error('Failed to fetch stock history');
+    return res.json();
+  },
+
+  async getAllStocks(): Promise<Stock[]> {
+    const res = await authFetch('/stocks');
+    if (!res.ok) throw new Error('Failed to fetch stock catalog');
     return res.json();
   },
 };

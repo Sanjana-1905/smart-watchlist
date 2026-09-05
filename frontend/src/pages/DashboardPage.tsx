@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { WatchlistResponse } from '../types/market';
 import { api } from '../services/api';
 import Dashboard from './Dashboard';
@@ -8,13 +8,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       const result = await api.getWatchlistChanges();
       setData(result);
@@ -24,7 +18,13 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  return <Dashboard data={data} loading={loading} error={error} />;
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
+
+  return <Dashboard data={data} loading={loading} error={error} onRefetch={fetchData} />;
 }

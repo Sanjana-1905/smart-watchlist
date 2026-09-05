@@ -9,16 +9,23 @@ from app.providers.mock import MockMarketDataProvider
 from app.providers.yfinance_provider import YFinanceProvider
 from app.providers.circuit_breaker import CircuitBreaker
 
+_mock_provider_singleton = None
+
 def get_provider(db: Session):
+    global _mock_provider_singleton
     if settings.market_provider == "yfinance":
         return YFinanceProvider(), "yfinance"
-    stocks = stock_repository.get_all(db)
-    base_prices = {}
-    for stock in stocks:
-        latest = stock_repository.get_latest_snapshot(db, stock.id)
-        if latest:
-            base_prices[stock.symbol] = float(latest.close)
-    return MockMarketDataProvider(base_prices), "mock"
+
+    if _mock_provider_singleton is None:
+        stocks = stock_repository.get_all(db)
+        base_prices = {}
+        for stock in stocks:
+            latest = stock_repository.get_latest_snapshot(db, stock.id)
+            if latest:
+                base_prices[stock.symbol] = float(latest.close)
+        _mock_provider_singleton = MockMarketDataProvider(base_prices)
+
+    return _mock_provider_singleton, "mock"
 
 def poll_once(db: Session, redis_client: redis.Redis) -> dict:
     """

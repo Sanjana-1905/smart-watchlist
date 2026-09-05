@@ -14,6 +14,12 @@ export default function RegisterPage() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
+
     setSubmitting(true);
     try {
       await register(email, password, displayName || undefined);
@@ -30,7 +36,7 @@ export default function RegisterPage() {
       <div className="w-full max-w-sm">
         <h1 className="text-lg font-semibold text-gray-900 mb-8">smart watchlist</h1>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} noValidate className="space-y-4">
           <div>
             <label className="block text-sm text-gray-600 mb-1">Display name (optional)</label>
             <input
@@ -58,8 +64,6 @@ export default function RegisterPage() {
             <label className="block text-sm text-gray-600 mb-1">Password</label>
             <input
               type="password"
-              required
-              minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-gray-900"

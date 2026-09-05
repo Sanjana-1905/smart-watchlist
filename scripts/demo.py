@@ -15,15 +15,18 @@ import uuid
 from pathlib import Path
 from datetime import datetime, timezone
 
-# scripts/demo.py lives inside backend/, as a sibling of app/, in both
-# the host repo (backend/scripts/demo.py) and the container (/app/scripts/demo.py,
-# since docker-compose mounts ./backend -> /app). So the backend root is always
-# exactly one directory up from this file.
-BACKEND_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(BACKEND_ROOT))
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent
+
+if (REPO_ROOT / "app").is_dir():
+    sys.path.insert(0, str(REPO_ROOT))
+elif (REPO_ROOT / "backend" / "app").is_dir():
+    sys.path.insert(0, str(REPO_ROOT / "backend"))
+else:
+    raise RuntimeError("Could not locate backend app package")
 
 from app.core.database import SessionLocal
-from app.models import Stock, PriceSnapshot, UserViewState, WatchlistItem
+from app.models import Stock, PriceSnapshot, UserViewState
 from sqlalchemy import select, delete
 
 
@@ -67,17 +70,6 @@ def get_avg_recent_volume(db, stock_id, exclude_today=True):
 
 
 def cmd_reset():
-    """
-    Reset to a clean, deterministic baseline:
-      1. Delete today's accumulated mock snapshots (undoes poller drift).
-      2. For each demo user, establish a view-state baseline as if they just
-         looked at every stock in their watchlist RIGHT NOW, using each
-         stock's last remaining (historical) close as last_viewed_price.
-
-    This makes `advance` meaningful: since_view_return will correctly show
-    the injected scenario's move relative to this baseline, instead of
-    being null (which was the old delete-based behavior).
-    """
     db = SessionLocal()
     try:
         today = datetime.now(timezone.utc).date()
@@ -89,39 +81,14 @@ def cmd_reset():
         db.commit()
         print(f"Deleted {deleted.rowcount} snapshot(s) from today.")
 
-        for uid_str in DEMO_USER_IDS:
-            uid = uuid.UUID(uid_str)
+        for uid in DEMO_USER_IDS:
+            deleted_views = db.execute(
+                delete(UserViewState).where(UserViewState.user_id == uuid.UUID(uid))
+            )
+        db.commit()
+        print(f"Cleared view-state for {len(DEMO_USER_IDS)} demo user(s).")
 
-            # Clear any prior view-state for this user first, so we don't
-            # leave stale rows for stocks no longer on their watchlist.
-            db.execute(delete(UserViewState).where(UserViewState.user_id == uid))
-            db.commit()
-
-            rows = db.execute(
-                select(WatchlistItem, Stock)
-                .join(Stock, WatchlistItem.stock_id == Stock.id)
-                .where(WatchlistItem.user_id == uid)
-            ).all()
-
-            now = datetime.now(timezone.utc)
-            baseline_count = 0
-            for _watchlist_item, stock in rows:
-                latest = get_latest_snapshot(db, stock.id)
-                if not latest:
-                    print(f"  WARNING: {stock.symbol} has no historical snapshot, skipping baseline.")
-                    continue
-                db.add(UserViewState(
-                    user_id=uid,
-                    stock_id=stock.id,
-                    last_viewed_at=now,
-                    last_viewed_price=latest.close,
-                ))
-                baseline_count += 1
-            db.commit()
-            print(f"  Established view-state baseline for {baseline_count} stock(s) for user {uid_str}.")
-
-        print("Reset complete. Baseline is now each stock's last historical close,")
-        print("and the demo user has just \"viewed\" everything at that price.")
+        print("Reset complete. Baseline is now each stock's last historical close.")
         print("Restart the backend so the mock provider re-seeds from this clean state:")
         print("    docker compose restart backend")
     finally:
@@ -188,3 +155,4 @@ if __name__ == "__main__":
         cmd_reset()
     else:
         cmd_advance()
+# HOST-EDIT-MARKER-1788571720

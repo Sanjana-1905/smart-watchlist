@@ -42,6 +42,7 @@ export interface UserProfile {
   attention_style: 'MOMENTUM' | 'STABILITY' | 'BALANCED';
   time_horizon: 'SHORT_TERM' | 'LONG_TERM';
   version: number;
+  onboarding_completed: boolean;
 }
 
 export type AttentionLevel = 'LOW' | 'MEDIUM' | 'HIGH';

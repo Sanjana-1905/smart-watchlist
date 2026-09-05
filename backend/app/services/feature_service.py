@@ -61,8 +61,13 @@ def get_session_close(session_snapshots: list) -> float:
 
 
 def get_session_volume(session_snapshots: list) -> float:
-    """Get total volume for a session (sum of all polls in the session)."""
-    return float(sum(snap.volume for snap in session_snapshots))
+    """
+    Volume for a session, taken from the latest observation in that session.
+    For historical single-snapshot sessions, this is that day's total volume.
+    For an in-progress live session, this represents cumulative volume so far --
+    not the sum of independently-sampled per-poll volumes, which double-counts.
+    """
+    return float(session_snapshots[-1].volume)
 
 
 def calculate_daily_returns_from_sessions(session_closes: list[float]) -> list[float]:
