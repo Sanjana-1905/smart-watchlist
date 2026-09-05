@@ -1,4 +1,5 @@
 import logging
+import sys
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -71,7 +72,11 @@ _scheduler = None
 @app.on_event("startup")
 def on_startup():
     global _scheduler
-    _scheduler = start_scheduler()
+    if settings.demo_mode:
+        logger.info("DEMO_MODE enabled -- automatic market polling disabled")
+        print("DEMO_MODE enabled -- automatic market polling disabled", file=sys.stderr)
+    else:
+        _scheduler = start_scheduler()
 
 @app.on_event("shutdown")
 def on_shutdown():
